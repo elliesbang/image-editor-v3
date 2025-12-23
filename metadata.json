@@ -1,0 +1,7 @@
+{
+  "name": "ImageGenius",
+  "description": "AI-powered image editor for background removal, tight cropping, keyword analysis, and SVG conversion.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
