@@ -14,6 +14,12 @@ const App: React.FC = () => {
   const [commonKeywords, setCommonKeywords] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   
+  // Auth States
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [showSignupModal, setShowSignupModal] = useState(false);
+  const [userRole, setUserRole] = useState<'special' | 'normal' | 'admin'>('normal');
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+
   const [options, setOptions] = useState<ProcessingOptions>({
     bgRemove: true,
     autoCrop: true,
@@ -154,7 +160,7 @@ const App: React.FC = () => {
               keywords: fileAnalysis?.keywords || [],
               svgContent: processed.svgContent,
               svgColorsList: processed.svgColorsList,
-              format: currentProcessFormat // 가공 완료 시점의 포맷 저장
+              format: currentProcessFormat
             }
           } : f));
         } catch (e) {
@@ -197,7 +203,7 @@ const App: React.FC = () => {
       link.download = `${f.result.title}.svg`;
     } else if (f.result.format === 'gif') {
       link.href = f.result.processedUrl;
-      link.download = `${f.result.title}.gif`; // 사용자의 요청에 따라 .gif 확장자로 저장
+      link.download = `${f.result.title}.gif`;
     } else {
       link.href = f.result.processedUrl;
       link.download = `${f.result.title}.png`;
@@ -219,7 +225,8 @@ const App: React.FC = () => {
   const hasCompletedResults = files.some(f => f.status === 'completed');
 
   return (
-    <div className="flex flex-col min-h-screen">
+    <div className="flex flex-col min-h-screen relative">
+      {/* Header */}
       <header className="flex-none flex items-center justify-between border-b border-border-color px-6 py-5 bg-surface sticky top-0 z-50 backdrop-blur-md bg-white/90 shadow-sm">
         <div className="flex items-center gap-4">
           <div className="size-11 rounded-2xl bg-primary flex items-center justify-center text-text-main shadow-glow transform rotate-3">
@@ -227,7 +234,102 @@ const App: React.FC = () => {
           </div>
           <h2 className="text-text-main text-2xl font-black tracking-tighter text-shadow-sm">ImageGenius</h2>
         </div>
+        <div className="flex items-center gap-3">
+          <button className="hidden md:flex items-center gap-2 px-5 py-2.5 bg-primary hover:bg-primary-hover rounded-2xl font-black text-sm transition-all shadow-sm active:scale-95 border-b-2 border-primary-hover">
+            <span className="material-symbols-outlined text-lg">workspace_premium</span>
+            업그레이드
+          </button>
+          <button 
+            onClick={() => isLoggedIn ? setIsLoggedIn(false) : setShowLoginModal(true)}
+            className="flex items-center gap-2 px-5 py-2.5 bg-background-light hover:bg-white border border-border-color rounded-2xl font-black text-sm transition-all shadow-sm active:scale-95"
+          >
+            <span className="material-symbols-outlined text-lg">{isLoggedIn ? 'logout' : 'person'}</span>
+            {isLoggedIn ? '로그아웃' : '로그인'}
+          </button>
+        </div>
       </header>
+
+      {/* Login Modal */}
+      {showLoginModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div className="bg-surface w-full max-w-md rounded-3xl shadow-soft overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-8 space-y-6">
+              <div className="flex justify-between items-center">
+                <h3 className="text-2xl font-black">로그인</h3>
+                <button onClick={() => setShowLoginModal(false)} className="text-text-sub hover:text-text-main transition-colors"><span className="material-symbols-outlined">close</span></button>
+              </div>
+              
+              <div className="space-y-4">
+                <div className="grid grid-cols-3 gap-2">
+                  {(['special', 'normal', 'admin'] as const).map(role => (
+                    <button 
+                      key={role} 
+                      onClick={() => setUserRole(role)}
+                      className={`py-2 rounded-xl text-xs font-black border transition-all ${userRole === role ? 'bg-primary border-primary shadow-inner' : 'bg-background-light border-border-color hover:border-primary/50'}`}
+                    >
+                      {role === 'special' ? '미치나' : role === 'normal' ? '일반' : '관리자'}
+                    </button>
+                  ))}
+                </div>
+                <input type="email" placeholder="이메일" className="w-full p-4 rounded-2xl border border-border-color bg-background-light font-bold outline-none focus:border-primary shadow-inner" />
+                <input type="password" placeholder="비밀번호" className="w-full p-4 rounded-2xl border border-border-color bg-background-light font-bold outline-none focus:border-primary shadow-inner" />
+              </div>
+
+              <button 
+                onClick={() => { setIsLoggedIn(true); setShowLoginModal(false); }}
+                className="w-full py-4 rounded-2xl bg-primary hover:bg-primary-hover font-black text-lg shadow-glow transition-all active:scale-95 border-b-4 border-primary-hover"
+              >
+                로그인하기
+              </button>
+
+              <div className="text-center pt-2">
+                <button 
+                  onClick={() => { setShowLoginModal(false); setShowSignupModal(true); }}
+                  className="text-sm font-black text-text-sub hover:text-primary transition-colors underline underline-offset-4"
+                >
+                  아직 회원이 아니신가요? 회원가입
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Signup Modal */}
+      {showSignupModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div className="bg-surface w-full max-w-md rounded-3xl shadow-soft overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-8 space-y-6">
+              <div className="flex justify-between items-center">
+                <h3 className="text-2xl font-black">회원가입</h3>
+                <button onClick={() => setShowSignupModal(false)} className="text-text-sub hover:text-text-main transition-colors"><span className="material-symbols-outlined">close</span></button>
+              </div>
+              
+              <div className="space-y-4">
+                <input type="text" placeholder="이름" className="w-full p-4 rounded-2xl border border-border-color bg-background-light font-bold outline-none focus:border-primary shadow-inner" />
+                <input type="email" placeholder="이메일" className="w-full p-4 rounded-2xl border border-border-color bg-background-light font-bold outline-none focus:border-primary shadow-inner" />
+                <input type="password" placeholder="비밀번호" className="w-full p-4 rounded-2xl border border-border-color bg-background-light font-bold outline-none focus:border-primary shadow-inner" />
+              </div>
+
+              <button 
+                onClick={() => { setShowSignupModal(false); setShowLoginModal(true); }}
+                className="w-full py-4 rounded-2xl bg-text-main text-white hover:bg-black font-black text-lg shadow-lg transition-all active:scale-95"
+              >
+                가입 완료
+              </button>
+
+              <div className="text-center pt-2">
+                <button 
+                  onClick={() => { setShowSignupModal(false); setShowLoginModal(true); }}
+                  className="text-sm font-black text-text-sub hover:text-primary transition-colors underline underline-offset-4"
+                >
+                  이미 계정이 있으신가요? 로그인
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="flex-1 w-full max-w-4xl mx-auto p-4 md:p-8 flex flex-col gap-10">
         <section className="bg-surface rounded-3xl p-8 border border-border-color shadow-soft space-y-4">
