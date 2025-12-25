@@ -1,63 +1,72 @@
-
-import { GoogleGenAI, Type } from "@google/genai";
+import { Type } from "@google/genai";
 import { GeminiAnalysisResponse } from "../types";
 
+let generationInFlight = false;
+let analysisInFlight = false;
+
+async function callGeminiEndpoint(body: Record<string, unknown>) {
+  const response = await fetch("/generate-image", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Gemini request failed: ${response.status} ${errorText}`);
+  }
+
+  return response.json();
+}
+
 /**
- * Service to handle image analysis and generation using Google Gemini API.
+ * Service to handle image analysis and generation using backend Gemini proxy.
  */
 export async function generateAIImages(prompt: string, count: number = 4, referenceImage?: string): Promise<string[]> {
-  // Gemini 3 Pro Image 모델은 고품질 사진 및 배경 생성에 최적화되어 있습니다.
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const model = 'gemini-2.0-flash-exp';
+  if (generationInFlight) return [];
+  generationInFlight = true;
 
-  const promises = Array.from({ length: count }).map(async () => {
-    try {
-      const parts: any[] = [];
-      
-      // 참조 이미지가 있는 경우 (배경 생성/편집 모드)
-      if (referenceImage) {
-        parts.push({
-          inlineData: {
-            data: referenceImage.split(",")[1],
-            mimeType: "image/png",
-          },
-        });
-      }
-      
-      // 텍스트 프롬프트 추가
-      parts.push({ text: prompt });
-
-      const response = await ai.models.generateContent({
-        model,
-        contents: { parts },
-        config: { 
-          imageConfig: { 
+  try {
+    const requests = Array.from({ length: count }).map(async () => {
+      const response = await callGeminiEndpoint({
+        prompt,
+        referenceImage,
+        model: "gemini-2.0-flash-exp",
+        config: {
+          imageConfig: {
             aspectRatio: "1:1",
-            imageSize: "1K" // 고해상도 설정
-          } 
-        }
+            imageSize: "1K",
+          },
+        },
       });
 
-      if (response.candidates && response.candidates[0].content.parts) {
+      if (response.candidates && response.candidates[0]?.content?.parts) {
         for (const part of response.candidates[0].content.parts) {
           if (part.inlineData) return `data:image/png;base64,${part.inlineData.data}`;
         }
       }
-    } catch (e) { 
-      console.error("Generation failed", e); 
-    }
-    return null;
-  });
+      return null;
+    });
 
-  const generated = await Promise.all(promises);
-  return generated.filter((img): img is string => img !== null);
+    const generated = await Promise.all(requests);
+    return generated.filter((img): img is string => img !== null);
+  } catch (e) {
+    console.error("Generation failed", e);
+    return [];
+  } finally {
+    generationInFlight = false;
+  }
 }
 
 export async function analyzeImages(
   images: { id: string; base64: string }[]
 ): Promise<GeminiAnalysisResponse> {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const model = "gemini-2.0-flash-exp";
+  if (analysisInFlight) {
+    throw new Error("Analysis already in progress");
+  }
+  analysisInFlight = true;
 
   const parts = images.map((img) => ({
     inlineData: {
@@ -86,40 +95,43 @@ export async function analyzeImages(
      "commonKeywords": ["공통핵심키워드1", ..., "총25개"]
    }`;
 
-  const response = await ai.models.generateContent({
-    model,
-    contents: [{ parts: [...parts, { text: prompt }] }],
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          files: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                id: { type: Type.STRING },
-                keywords: { type: Type.ARRAY, items: { type: Type.STRING } },
-                title: { type: Type.STRING },
+  try {
+    const response = await callGeminiEndpoint({
+      prompt,
+      images,
+      model: "gemini-2.0-flash-exp",
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            files: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  id: { type: Type.STRING },
+                  keywords: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  title: { type: Type.STRING },
+                },
+                required: ["id", "keywords", "title"],
               },
-              required: ["id", "keywords", "title"],
+            },
+            commonKeywords: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
             },
           },
-          commonKeywords: {
-            type: Type.ARRAY,
-            items: { type: Type.STRING },
-          },
+          required: ["files", "commonKeywords"],
         },
-        required: ["files", "commonKeywords"],
       },
-    },
-  });
+    });
 
-  try {
     return JSON.parse(response.text || "{}") as GeminiAnalysisResponse;
   } catch (e) {
     console.error("Failed to parse Gemini response", e);
     throw new Error("분석 데이터 생성 실패");
+  } finally {
+    analysisInFlight = false;
   }
 }
