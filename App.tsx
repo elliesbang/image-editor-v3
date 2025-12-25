@@ -420,6 +420,41 @@ export const App: React.FC = () => {
               <span className={`material-symbols-outlined ${options.autoCrop ? 'text-primary' : 'text-text-sub'}`}>{options.autoCrop ? 'check_circle' : 'radio_button_unchecked'}</span>
             </button>
           </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-background-light p-4 rounded-2xl border border-border-color shadow-inner space-y-2">
+              <div className="flex items-center justify-between text-sm font-black text-text-main">
+                <span>리사이즈 (가로 기준)</span>
+                <span className="text-xs text-text-sub">세로 자동 비율</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  min={0}
+                  className="flex-1 px-3 py-2 rounded-xl border border-border-color bg-white text-sm font-bold outline-none"
+                  value={options.resizeWidth}
+                  onChange={(e) => setOptions(o => ({...o, resizeWidth: Math.max(0, Number(e.target.value))}))}
+                />
+                <span className="text-xs font-black text-text-sub">px</span>
+              </div>
+              <p className="text-[11px] text-text-sub font-bold">0 입력 시 원본 크기 유지</p>
+            </div>
+            <div className="bg-background-light p-4 rounded-2xl border border-border-color shadow-inner space-y-2">
+              <div className="flex items-center justify-between text-sm font-black text-text-main">
+                <span>노이즈 제거</span>
+                <span className="text-xs text-text-sub">강도 {options.noiseLevel}</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={5}
+                step={1}
+                value={options.noiseLevel}
+                onChange={(e) => setOptions(o => ({...o, noiseLevel: Number(e.target.value)}))}
+                className="w-full accent-primary"
+              />
+              <p className="text-[11px] text-text-sub font-bold">필요 시만 사용하세요. 강도가 높을수록 디테일이 부드러워집니다.</p>
+            </div>
+          </div>
           <div className="space-y-4 border-t border-border-color pt-8">
             <label className="text-xs font-black text-text-sub uppercase">변환 포맷 및 상세 설정</label>
             <div className="flex gap-2">
