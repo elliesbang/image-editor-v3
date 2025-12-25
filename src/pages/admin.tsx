@@ -1,6 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom/client';
+import { AuthProvider } from '../auth/AuthContext';
+import { ProtectedRoute } from '../auth/ProtectedRoute';
 import { supabase } from '../lib/supabaseClient';
 
 const AdminDashboard = () => {
@@ -8,12 +10,6 @@ const AdminDashboard = () => {
   const [users, setUsers] = useState<any[]>([]);
   const [whitelist, setWhitelist] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-
-  const fetchProfile = async (userId: string) => {
-    const { data, error } = await supabase.from('profiles').select('role').eq('id', userId).single();
-    if (error) throw error;
-    return data;
-  };
 
   const fetchInitialData = async () => {
     setLoading(true);
@@ -32,35 +28,7 @@ const AdminDashboard = () => {
   };
 
   useEffect(() => {
-    const ensureAdmin = async () => {
-      const { data } = await supabase.auth.getSession();
-      const sessionUser = data.session?.user;
-      if (!sessionUser) {
-        window.location.href = '/home';
-        return;
-      }
-
-      try {
-        const profile = await fetchProfile(sessionUser.id);
-        if (profile?.role === 'admin') {
-          fetchInitialData();
-        } else {
-          window.location.href = '/home';
-        }
-      } catch (error) {
-        console.error('Failed to verify admin role', error);
-        window.location.href = '/home';
-      }
-    };
-
-    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_OUT' || !session?.user) {
-        window.location.href = '/home';
-      }
-    });
-
-    ensureAdmin();
-    return () => listener?.subscription.unsubscribe();
+    fetchInitialData();
   }, []);
 
   const handleCsvUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -525,6 +493,11 @@ const AdminDashboard = () => {
     </div>
   );
 };
-
 const root = ReactDOM.createRoot(document.getElementById('root')!);
-root.render(<AdminDashboard />);
+root.render(
+  <AuthProvider>
+    <ProtectedRoute>
+      <AdminDashboard />
+    </ProtectedRoute>
+  </AuthProvider>
+);
