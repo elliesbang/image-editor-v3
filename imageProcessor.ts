@@ -1,8 +1,7 @@
 
 /**
  * Advanced Image Processing Library
- * Specialized for High-Fidelity SVG Tracing with a strict 150KB size limit.
- * Focuses on original color preservation, gap prevention, and guaranteed file size.
+ * Specialized for High-Fidelity SVG Tracing with Subject Protection.
  */
 
 export async function processImage(
@@ -34,84 +33,92 @@ export async function processImage(
   let width = canvas.width;
   let height = canvas.height;
 
-  // 1. Background Removal & Auto Crop (Clean and Tight)
-  if (options.bgRemove || options.autoCrop) {
+  // 1. Background Removal (Subject Protection Logic)
+  if (options.bgRemove) {
     const imageData = ctx.getImageData(0, 0, width, height);
     const data = imageData.data;
     
-    if (options.bgRemove) {
-      const bgColors: {r: number, g: number, b: number}[] = [];
-      const steps = 15; // Increased sampling for cleaner removal
-      for (let i = 0; i < steps; i++) {
-        const pts = [
-          {x: Math.floor(width * i / (steps-1)), y: 0},
-          {x: Math.floor(width * i / (steps-1)), y: height - 1},
-          {x: 0, y: Math.floor(height * i / (steps-1))},
-          {x: width - 1, y: Math.floor(height * i / (steps-1))}
-        ];
-        pts.forEach(p => {
-          const idx = (p.y * width + p.x) * 4;
-          if (data[idx + 3] > 0) {
-            bgColors.push({ r: data[idx], g: data[idx+1], b: data[idx+2] });
-          }
-        });
-      }
+    // 샘플링 영역: 모서리와 테두리 위주로 배경색 추정
+    const bgColors: {r: number, g: number, b: number}[] = [];
+    const inset = 2; // 가장자리에서 약간 안쪽
+    const samples = [
+      {x: inset, y: inset}, {x: width - inset, y: inset},
+      {x: inset, y: height - inset}, {x: width - inset, y: height - inset},
+      {x: Math.floor(width/2), y: inset}, {x: Math.floor(width/2), y: height - inset},
+      {x: inset, y: Math.floor(height/2)}, {x: width - inset, y: Math.floor(height/2)}
+    ];
 
-      const getDistance = (r1: number, g1: number, b1: number, r2: number, g2: number, b2: number) => {
-        const rmean = (r1 + r2) / 2;
-        const dr = r1 - r2, dg = g1 - g2, db = b1 - b2;
-        return Math.sqrt(((2 + rmean / 256) * dr * dr) + (4 * dg * dg) + ((2 + (255 - rmean) / 256) * db * db));
-      };
+    samples.forEach(p => {
+      const idx = (p.y * width + p.x) * 4;
+      bgColors.push({ r: data[idx], g: data[idx+1], b: data[idx+2] });
+    });
 
-      for (let i = 0; i < data.length; i += 4) {
-        const r = data[i], g = data[i+1], b = data[i+2];
-        let minColorDist = 1000;
-        for (const bg of bgColors) {
-          const dist = getDistance(r, g, b, bg.r, bg.g, bg.b);
-          if (dist < minColorDist) minColorDist = dist;
-        }
-        let threshold = 35; 
-        if (r > 240 && g > 240 && b > 240) threshold = 20; // Stricter for whites
-        if (minColorDist < threshold) data[i + 3] = 0;
-        else data[i + 3] = 255;
+    const getDistance = (r1: number, g1: number, b1: number, r2: number, g2: number, b2: number) => {
+      return Math.sqrt(Math.pow(r1-r2, 2) + Math.pow(g1-g2, 2) + Math.pow(b1-b2, 2));
+    };
+
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const maxDist = Math.sqrt(centerX * centerX + centerY * centerY);
+
+    for (let i = 0; i < data.length; i += 4) {
+      const x = (i / 4) % width;
+      const y = Math.floor((i / 4) / width);
+      const r = data[i], g = data[i+1], b = data[i+2];
+      
+      let minColorDist = 1000;
+      bgColors.forEach(bg => {
+        const d = getDistance(r, g, b, bg.r, bg.g, bg.b);
+        if (d < minColorDist) minColorDist = d;
+      });
+
+      // 피사체 보호 로직: 중심부에 가까울수록, 색상 거리가 일정 이상이면 배경으로 간주하지 않음
+      const distFromCenter = Math.sqrt(Math.pow(x - centerX, 2) + Math.pow(y - centerY, 2));
+      const centerFactor = distFromCenter / maxDist; // 0 (중심) ~ 1 (가장자리)
+      
+      let threshold = 40 * (0.5 + centerFactor * 0.5); // 가장자리는 관대하게, 중심은 엄격하게
+      
+      if (minColorDist < threshold) {
+        data[i + 3] = 0;
       }
-      // Sharp Alpha Mask
-      for (let i = 0; i < data.length; i += 4) if (data[i + 3] < 128) data[i + 3] = 0; else data[i + 3] = 255;
     }
-
     ctx.putImageData(imageData, 0, 0);
+  }
 
-    if (options.autoCrop) {
-      let minX = width, minY = height, maxX = 0, maxY = 0, found = false;
-      const scanData = ctx.getImageData(0, 0, width, height).data;
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          if (scanData[(y * width + x) * 4 + 3] > 0) {
-            if (x < minX) minX = x; if (x > maxX) maxX = x;
-            if (y < minY) minY = y; if (y > maxY) maxY = y;
-            found = true;
-          }
+  // 2. Auto Crop (Subject Tight Logic)
+  if (options.autoCrop) {
+    const scanData = ctx.getImageData(0, 0, width, height).data;
+    let minX = width, minY = height, maxX = 0, maxY = 0, found = false;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        if (scanData[(y * width + x) * 4 + 3] > 10) { // 어느정도 불투명한 픽셀만 체크
+          if (x < minX) minX = x; if (x > maxX) maxX = x;
+          if (y < minY) minY = y; if (y > maxY) maxY = y;
+          found = true;
         }
       }
-      if (found) {
-        const cw = (maxX - minX) + 1, ch = (maxY - minY) + 1;
-        const croppedCanvas = document.createElement('canvas');
-        croppedCanvas.width = cw; croppedCanvas.height = ch;
-        croppedCanvas.getContext('2d')!.drawImage(canvas, minX, minY, cw, ch, 0, 0, cw, ch);
-        canvas = croppedCanvas;
-        ctx = canvas.getContext('2d')!;
-        width = cw; height = ch;
-      }
+    }
+    if (found) {
+      const cw = (maxX - minX) + 1;
+      const ch = (maxY - minY) + 1;
+      const croppedCanvas = document.createElement('canvas');
+      croppedCanvas.width = cw; croppedCanvas.height = ch;
+      const cctx = croppedCanvas.getContext('2d')!;
+      cctx.drawImage(canvas, minX, minY, cw, ch, 0, 0, cw, ch);
+      canvas = croppedCanvas;
+      ctx = cctx;
+      width = cw; height = ch;
     }
   }
 
-  // 2. Resize
+  // 3. Resize
   if (options.resizeWidth > 0 && options.resizeWidth !== width) {
     const aspectRatio = height / width;
     const targetHeight = Math.round(options.resizeWidth * aspectRatio);
     const resizedCanvas = document.createElement('canvas');
     resizedCanvas.width = options.resizeWidth; resizedCanvas.height = targetHeight;
     const rctx = resizedCanvas.getContext('2d')!;
+    rctx.imageSmoothingEnabled = true;
     rctx.imageSmoothingQuality = 'high';
     rctx.drawImage(canvas, 0, 0, width, height, 0, 0, options.resizeWidth, targetHeight);
     canvas = resizedCanvas;
@@ -119,7 +126,7 @@ export async function processImage(
     width = canvas.width; height = canvas.height;
   }
 
-  // 3. SVG Tracing
+  // 4. SVG Tracing (150KB Limit + Transparent + No Stroke)
   let svgContent: string | undefined;
   let svgColorsList: string[] | undefined;
   if (options.format === 'svg') {
@@ -139,105 +146,77 @@ export async function processImage(
   };
 }
 
-/**
- * High-fidelity SVG Tracing with guaranteed 150KB limit and original color palette extraction.
- */
 async function traceToSVG(canvas: HTMLCanvasElement, colorsCount: number): Promise<{ content: string; colors: string[] }> {
   const MAX_BYTES = 150 * 1024;
-
-  const generate = (sourceW: number, sourceH: number, data: Uint8ClampedArray, limit: number) => {
-    // 1. Extract Dominant Colors (Original Colors)
-    const colorFrequency: Record<string, number> = {};
+  let scale = 1.0;
+  
+  const performTrace = (w: number, h: number, data: Uint8ClampedArray, limit: number) => {
+    const colorFreq: Record<string, number> = {};
     for (let i = 0; i < data.length; i += 4) {
-      if (data[i + 3] < 128) continue;
-      const hex = `#${((1 << 24) + (data[i] << 16) + (data[i + 1] << 8) + data[i + 2]).toString(16).slice(1).toUpperCase()}`;
-      colorFrequency[hex] = (colorFrequency[hex] || 0) + 1;
+      if (data[i+3] < 128) continue;
+      const hex = `#${((1 << 24) + (data[i] << 16) + (data[i+1] << 8) + data[i+2]).toString(16).slice(1).toUpperCase()}`;
+      colorFreq[hex] = (colorFreq[hex] || 0) + 1;
     }
-    
-    const palette = Object.entries(colorFrequency)
+
+    const palette = Object.entries(colorFreq)
       .sort((a, b) => b[1] - a[1])
       .slice(0, limit)
       .map(e => e[0]);
 
-    if (palette.length === 0) return { content: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${sourceW} ${sourceH}"></svg>`, colors: [] };
+    if (palette.length === 0) return { content: '', colors: [] };
 
-    // Prepare Palette RGB for fast distance check
-    const paletteRgb = palette.map(hex => {
-      const bigint = parseInt(hex.slice(1), 16);
-      return { r: (bigint >> 16) & 255, g: (bigint >> 8) & 255, b: bigint & 255, hex };
+    const rgbPalette = palette.map(hex => {
+      const b = parseInt(hex.slice(1), 16);
+      return { r: (b >> 16) & 255, g: (b >> 8) & 255, b: b & 255, hex };
     });
 
-    // 2. Map Pixels to Palette and Build Paths (Horizontal RLE for size)
-    const colorPaths: Record<string, string[]> = {};
-    palette.forEach(c => colorPaths[c] = []);
+    const paths: Record<string, string[]> = {};
+    palette.forEach(c => paths[c] = []);
 
-    for (let y = 0; y < sourceH; y++) {
+    for (let y = 0; y < h; y++) {
       let startX = -1;
       let lastHex = "";
-
-      for (let x = 0; x < sourceW; x++) {
-        const idx = (y * sourceW + x) * 4;
-        const alpha = data[idx + 3];
+      for (let x = 0; x < w; x++) {
+        const idx = (y * w + x) * 4;
         let currentHex = "";
-
-        if (alpha > 128) {
-          const r = data[idx], g = data[idx+1], b = data[idx+2];
-          let minDist = Infinity;
-          let bestHex = palette[0];
-          for(let i=0; i < paletteRgb.length; i++) {
-            const p = paletteRgb[i];
-            const d = Math.pow(r-p.r, 2) + Math.pow(g-p.g, 2) + Math.pow(b-p.b, 2);
-            if(d < minDist) { minDist = d; bestHex = p.hex; }
-          }
-          currentHex = bestHex;
+        if (data[idx+3] > 128) {
+          let minD = Infinity;
+          rgbPalette.forEach(p => {
+            const d = Math.pow(data[idx]-p.r, 2) + Math.pow(data[idx+1]-p.g, 2) + Math.pow(data[idx+2]-p.b, 2);
+            if (d < minD) { minD = d; currentHex = p.hex; }
+          });
         }
 
         if (currentHex !== lastHex) {
-          if (lastHex !== "") {
-            // Overlap of 0.05 to ensure no gaps between paths
-            colorPaths[lastHex].push(`M${startX},${y}h${x - startX}.05v1.05h-${x - startX}.05z`);
-          }
-          startX = x;
-          lastHex = currentHex;
+          if (lastHex !== "") paths[lastHex].push(`M${startX},${y}h${x-startX}v1h-${x-startX}z`);
+          startX = x; lastHex = currentHex;
         }
       }
-      if (lastHex !== "") {
-        colorPaths[lastHex].push(`M${startX},${y}h${sourceW - startX}.05v1.05h-${sourceW - startX}.05z`);
-      }
+      if (lastHex !== "") paths[lastHex].push(`M${startX},${y}h${w-startX}v1h-${w-startX}z`);
     }
 
-    const svgHeader = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${sourceW} ${sourceH}" shape-rendering="crispEdges">`;
-    let svgPaths = '';
-    palette.forEach(color => {
-      if (colorPaths[color].length > 0) {
-        svgPaths += `<path d="${colorPaths[color].join('')}" fill="${color}" stroke="none" />`;
+    let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" shape-rendering="crispEdges">`;
+    palette.forEach(c => {
+      if (paths[c].length > 0) {
+        svg += `<path d="${paths[c].join('')}" fill="${c}" stroke="none" />`;
       }
     });
-    return { content: svgHeader + svgPaths + `</svg>`, colors: palette };
+    svg += `</svg>`;
+    return { content: svg, colors: palette };
   };
 
-  // Adaptive Resizing to stay under 150KB
-  let scale = 1.0;
-  if (canvas.width * canvas.height > 800 * 800) scale = 0.6; // Initial shrink for efficiency
-  
-  let finalResult;
-  while(true) {
+  let result = { content: '', colors: [] as string[] };
+  while(scale > 0.1) {
     const sw = Math.round(canvas.width * scale);
     const sh = Math.round(canvas.height * scale);
-    const sc = document.createElement('canvas');
-    sc.width = sw; sc.height = sh;
-    const sctx = sc.getContext('2d', {willReadFrequently: true})!;
-    sctx.drawImage(canvas, 0, 0, sw, sh);
-    const data = sctx.getImageData(0, 0, sw, sh).data;
-    
-    finalResult = generate(sw, sh, data, colorsCount);
-    
-    // Check if within 150KB or reached minimum usable scale
-    if (finalResult.content.length <= MAX_BYTES || scale < 0.1) {
-      break;
-    }
-    scale *= 0.7; // Aggressive scale down to meet limit
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = sw; tempCanvas.height = sh;
+    const tctx = tempCanvas.getContext('2d')!;
+    tctx.drawImage(canvas, 0, 0, sw, sh);
+    const data = tctx.getImageData(0, 0, sw, sh).data;
+    result = performTrace(sw, sh, data, colorsCount);
+    if (result.content.length < MAX_BYTES) break;
+    scale *= 0.8;
   }
-  
-  return finalResult;
+  return result;
 }

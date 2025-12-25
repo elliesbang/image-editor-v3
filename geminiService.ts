@@ -11,11 +11,15 @@ export async function generateAIImages(prompt: string, count: number = 4): Promi
     try {
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
-        contents: [{ text: `${prompt} --seed ${Math.floor(Math.random() * 1000000)}` }],
+        contents: {
+          parts: [{ text: `${prompt} --seed ${Math.floor(Math.random() * 1000000)}` }]
+        },
         config: { imageConfig: { aspectRatio: "1:1" } }
       });
-      for (const part of response.candidates[0].content.parts) {
-        if (part.inlineData) return `data:image/png;base64,${part.inlineData.data}`;
+      if (response.candidates && response.candidates[0].content.parts) {
+        for (const part of response.candidates[0].content.parts) {
+          if (part.inlineData) return `data:image/png;base64,${part.inlineData.data}`;
+        }
       }
     } catch (e) { console.error("Generation failed", e); }
     return null;
