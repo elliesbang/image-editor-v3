@@ -71,8 +71,8 @@ const App: React.FC = () => {
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
   
-  const [loginForm, setLoginForm] = useState({ email: '', password: '' });
-  const [signupForm, setSignupForm] = useState({ name: '', email: '', password: '' });
+  const [loginForm, setLoginForm] = useState({ email: '', password: '', role: 'normal' as UserRole });
+  const [signupForm, setSignupForm] = useState({ name: '', email: '', password: '', role: 'normal' as UserRole });
   
   const [user, setUser] = useState<UserAuth>({
     uid: '', isLoggedIn: false, email: '', name: '', role: 'normal',
@@ -132,16 +132,17 @@ const App: React.FC = () => {
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, signupForm.email, signupForm.password);
       const newUser = userCredential.user;
+      const plan = signupForm.role === 'special' ? 'michina' : 'free';
       const userData = {
         uid: newUser.uid,
         name: signupForm.name,
         email: signupForm.email,
-        role: 'normal',
-        plan: 'free',
-        credits: 30,
-        svgLimit: 5,
+        role: signupForm.role,
+        plan: plan,
+        credits: plan === 'michina' ? 'unlimited' : 30,
+        svgLimit: plan === 'michina' ? 'unlimited' : 5,
         svgUsage: 0,
-        gifLimit: 5,
+        gifLimit: plan === 'michina' ? 'unlimited' : 5,
         gifUsage: 0
       };
       await setDoc(doc(db, "users", newUser.uid), userData);
@@ -218,7 +219,6 @@ const App: React.FC = () => {
     if (files.length === 0) return;
     const targets = files.filter(f => selectedIds.size === 0 || selectedIds.has(f.id));
     
-    // 크레딧 및 기능 제한 체크
     if (user.credits !== 'unlimited' && (user.credits as number) < targets.length) {
       alert("크레딧이 부족합니다.");
       setShowUpgradeModal(true);
@@ -256,7 +256,6 @@ const App: React.FC = () => {
         } : f));
       }
 
-      // 유저 상태 업데이트 (크레딧, SVG/GIF 사용량)
       const updates: any = {};
       if (user.credits !== 'unlimited') updates.credits = (user.credits as number) - targets.length;
       if (options.format === 'svg' && user.svgLimit !== 'unlimited') updates.svgUsage = user.svgUsage + targets.length;
@@ -408,7 +407,6 @@ const App: React.FC = () => {
               </section>
             )}
 
-            {/* 개별 이미지 처리 결과 */}
             <section className="grid grid-cols-1 gap-6">
               {files.filter(f => f.status === 'completed' && f.result).map(f => (
                 <div key={f.id} className="bg-surface rounded-3xl p-8 border border-border-color shadow-soft flex flex-col md:flex-row gap-8 animate-in fade-in zoom-in-95 duration-300">
@@ -452,7 +450,6 @@ const App: React.FC = () => {
         <p className="text-[10px] font-bold text-text-sub opacity-50">© 2025 ImageGenius. All rights reserved.</p>
       </footer>
 
-      {/* Upgrade Modal */}
       {showUpgradeModal && (
         <div className="fixed inset-0 z-[140] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-[2.5rem] shadow-2xl relative p-8 md:p-12">
@@ -528,6 +525,13 @@ const App: React.FC = () => {
             <button onClick={() => setShowLoginModal(false)} className="absolute top-8 right-8 text-text-sub hover:text-text-main"><span className="material-symbols-outlined text-2xl">close</span></button>
             <h3 className="text-3xl font-black">로그인</h3>
             <div className="space-y-4">
+              <div className="flex gap-2 p-1 bg-background-light rounded-xl border border-border-color">
+                {(['normal', 'special', 'admin'] as UserRole[]).map(r => (
+                  <button key={r} onClick={() => setLoginForm(p => ({...p, role: r}))} className={`flex-1 py-2 rounded-lg text-xs font-black transition-all ${loginForm.role === r ? 'bg-primary shadow-sm' : 'text-text-sub'}`}>
+                    {r === 'admin' ? '관리자' : r === 'special' ? '미치나' : '일반'}
+                  </button>
+                ))}
+              </div>
               <input type="email" placeholder="이메일" value={loginForm.email} onChange={e => setLoginForm(p => ({...p, email: e.target.value}))} className="w-full p-5 rounded-2xl border border-border-color bg-background-light font-bold" />
               <input type="password" placeholder="비밀번호" value={loginForm.password} onChange={e => setLoginForm(p => ({...p, password: e.target.value}))} className="w-full p-5 rounded-2xl border border-border-color bg-background-light font-bold" />
             </div>
@@ -553,6 +557,13 @@ const App: React.FC = () => {
             </button>
             <h3 className="text-3xl font-black mt-4">회원가입</h3>
             <div className="space-y-4">
+              <div className="flex gap-2 p-1 bg-background-light rounded-xl border border-border-color">
+                {(['normal', 'special'] as UserRole[]).map(r => (
+                  <button key={r} onClick={() => setSignupForm(p => ({...p, role: r}))} className={`flex-1 py-2 rounded-lg text-xs font-black transition-all ${signupForm.role === r ? 'bg-primary shadow-sm' : 'text-text-sub'}`}>
+                    {r === 'special' ? '미치나 가입' : '일반 가입'}
+                  </button>
+                ))}
+              </div>
               <input type="text" placeholder="이름" value={signupForm.name} onChange={e => setSignupForm(p => ({...p, name: e.target.value}))} className="w-full p-5 rounded-2xl border border-border-color bg-background-light font-bold" />
               <input type="email" placeholder="이메일" value={signupForm.email} onChange={e => setSignupForm(p => ({...p, email: e.target.value}))} className="w-full p-5 rounded-2xl border border-border-color bg-background-light font-bold" />
               <input type="password" placeholder="비밀번호" value={signupForm.password} onChange={e => setSignupForm(p => ({...p, password: e.target.value}))} className="w-full p-5 rounded-2xl border border-border-color bg-background-light font-bold" />

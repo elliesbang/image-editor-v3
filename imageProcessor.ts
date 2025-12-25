@@ -146,14 +146,20 @@ export async function processImage(
 
   let svgContent: string | undefined;
   let svgColorsList: string[] | undefined;
+  let processedUrl = canvas.toDataURL(`image/png`);
+
   if (options.format === 'svg') {
     const trace = await traceToSVG(canvas, options.svgColors);
     svgContent = trace.content;
     svgColorsList = trace.colors;
+    // SVG 프리뷰를 위해 데이터 URL 생성
+    if (svgContent) {
+      processedUrl = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svgContent)))}`;
+    }
   }
 
   return {
-    processedUrl: canvas.toDataURL(`image/png`),
+    processedUrl,
     width, height, svgContent, svgColorsList
   };
 }
@@ -162,13 +168,12 @@ async function traceToSVG(canvas: HTMLCanvasElement, colorsCount: number): Promi
   // 사용자의 요청대로 150KB 이하로 엄격히 제한
   const MAX_BYTES = 150 * 1024; 
   let scale = 1.0;
-  // 원본그대로(12) 선택 시 최대 256색, 그 외에는 선택된 수만큼 제한
   const effectiveLimit = colorsCount === 12 ? 256 : colorsCount;
   
   const performTrace = (w: number, h: number, data: Uint8ClampedArray, limit: number) => {
     const colorFreq: Record<string, number> = {};
     for (let i = 0; i < data.length; i += 4) {
-      if (data[i+3] < 50) continue; // 투명도 낮은 픽셀 제외
+      if (data[i+3] < 50) continue;
       const hex = `#${((1 << 24) + (data[i] << 16) + (data[i+1] << 8) + data[i+2]).toString(16).slice(1).toUpperCase()}`;
       colorFreq[hex] = (colorFreq[hex] || 0) + 1;
     }
@@ -201,11 +206,43 @@ async function traceToSVG(canvas: HTMLCanvasElement, colorsCount: number): Promi
 
         if (currentHex !== lastHex) {
           if (lastHex !== "") {
-            // 가로 병합 로직 최적화 (M x y h L v 1 h -L z 형태의 벡터 패스)
             paths[lastHex].push(`M${startX} ${y}h${x-startX}v1h-${x-startX}z`);
           }
           startX = x; lastHex = currentHex;
         }
       }
       if (lastHex !== "") {
-        paths[lastHex].push(`M${startX} ${y}h${
+        paths[lastHex].push(`M${startX} ${y}h${w - startX}v1h-${w - startX}z`);
+      }
+    }
+
+    let svgStr = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}">`;
+    for (const color of palette) {
+      if (paths[color].length > 0) {
+        svgStr += `<path d="${paths[color].join('')}" fill="${color}" shape-rendering="crispEdges" />`;
+      }
+    }
+    svgStr += `</svg>`;
+    
+    return { content: svgStr, colors: palette };
+  };
+
+  let result = { content: '', colors: [] as string[] };
+  while (scale > 0.05) {
+    const sw = Math.max(1, Math.round(canvas.width * scale));
+    const sh = Math.max(1, Math.round(canvas.height * scale));
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = sw; tempCanvas.height = sh;
+    const tctx = tempCanvas.getContext('2d', { willReadFrequently: true })!;
+    tctx.drawImage(canvas, 0, 0, sw, sh);
+    const data = tctx.getImageData(0, 0, sw, sh).data;
+    
+    result = performTrace(sw, sh, data, effectiveLimit);
+    
+    // 바이트 크기 체크
+    if (result.content.length < MAX_BYTES) break;
+    scale *= 0.8; // 150KB 넘으면 해상도 줄임
+  }
+  
+  return result;
+}
