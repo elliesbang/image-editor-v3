@@ -3,40 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { ImageData, ProcessingOptions, GeminiAnalysisResponse } from './types';
 import { analyzeImages, generateAIImages } from './geminiService';
 import { processImage } from './imageProcessor';
-
-// Firebase SDK Imports (CDN)
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import { 
-  getAuth, 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
-  signInWithPopup, 
-  GoogleAuthProvider, 
-  onAuthStateChanged,
-  signOut 
-} from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-import { 
-  getFirestore, 
-  doc, 
-  getDoc, 
-  setDoc,
-  updateDoc
-} from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-
-const firebaseConfig = {
-  apiKey: "AIzaSyCUJColyeKcWo0CSN-6_k3urHkL2Haq91Q",
-  authDomain: "gen-lang-client-0303289355.firebaseapp.com",
-  projectId: "gen-lang-client-0303289355",
-  storageBucket: "gen-lang-client-0303289355.firebasestorage.app",
-  messagingSenderId: "1059346647906",
-  appId: "1:1059346647906:web:865529f7f4575836262450",
-  measurementId: "G-H9M9C074C5"
-};
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const googleProvider = new GoogleAuthProvider();
+import { supabase } from './src/lib/supabaseClient';
 
 type PlanType = 'free' | 'basic' | 'standard' | 'premium' | 'michina';
 type UserRole = 'special' | 'normal' | 'admin';
@@ -63,16 +30,17 @@ export const App: React.FC = () => {
   const [generationPrompt, setGenerationPrompt] = useState('');
   const [commonKeywords, setCommonKeywords] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
-  
+
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showSignupModal, setShowSignupModal] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
-  
+
   const [loginForm, setLoginForm] = useState({ email: '', password: '', role: 'normal' as UserRole });
-  const [signupForm, setSignupForm] = useState({ name: '', email: '', password: '', role: 'normal' as UserRole });
+  const [signupForm, setSignupForm] = useState({ name: '', email: '', password: '' });
+  const [authError, setAuthError] = useState('');
   
   const [user, setUser] = useState<UserAuth>(() => {
     try {
@@ -93,40 +61,64 @@ export const App: React.FC = () => {
     bgRemove: true, autoCrop: true, format: 'png', svgColors: 6, resizeWidth: 1080, noiseLevel: 0, gifMotion: '부드럽게 좌우로 흔들리는 효과'
   });
 
+  const mapProfileToUserState = (profile: any, supabaseUser: any): UserAuth => {
+    const dbRole = (profile?.role || 'user') as 'user' | 'michina' | 'admin';
+    const mappedRole: UserRole = dbRole === 'admin' ? 'admin' : dbRole === 'michina' ? 'special' : 'normal';
+
+    return {
+      uid: supabaseUser.id,
+      isLoggedIn: true,
+      email: supabaseUser.email || profile?.email || '',
+      name: profile?.full_name || profile?.name || '사용자',
+      role: mappedRole,
+      plan: profile?.plan || 'free',
+      credits: profile?.credits ?? 30,
+      svgUsage: profile?.svg_usage || 0,
+      svgLimit: profile?.svg_limit ?? 5,
+      gifUsage: profile?.gif_usage || 0,
+      gifLimit: profile?.gif_limit ?? 5,
+    };
+  };
+
+  const fetchProfile = async (userId: string) => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, role, email, full_name, name, plan, credits, svg_usage, svg_limit, gif_usage, gif_limit')
+      .eq('id', userId)
+      .single();
+
+    if (error) throw error;
+    return data;
+  };
+
+  const refreshUserState = async (userId: string, sessionUser: any) => {
+    try {
+      const profile = await fetchProfile(userId);
+      const mapped = mapProfileToUserState(profile, sessionUser);
+      setUser(mapped);
+      localStorage.setItem('genius_user_cache', JSON.stringify(mapped));
+    } catch (error) {
+      console.error('Profile load failed', error);
+      setUser(prev => {
+        const newState = { ...prev, isLoggedIn: false };
+        localStorage.setItem('genius_user_cache', JSON.stringify(newState));
+        return newState;
+      });
+    }
+  };
+
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        const userDocRef = doc(db, "users", firebaseUser.uid);
-        const userDoc = await getDoc(userDocRef);
-        const configDoc = await getDoc(doc(db, "settings", "whitelist"));
-        const whitelist: string[] = configDoc.exists() ? configDoc.data().emails || [] : [];
+    const initAuth = async () => {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (sessionData.session?.user) {
+        await refreshUserState(sessionData.session.user.id, sessionData.session.user);
+      }
+    };
 
-        if (userDoc.exists()) {
-          let userData = userDoc.data();
-          if (userData.role !== 'admin' && whitelist.includes(firebaseUser.email || '')) {
-            if (userData.plan !== 'michina') {
-              await updateDoc(userDocRef, { plan: 'michina', credits: 'unlimited', svgLimit: 'unlimited', gifLimit: 'unlimited' });
-              userData = { ...userData, plan: 'michina', credits: 'unlimited', svgLimit: 'unlimited', gifLimit: 'unlimited' };
-            }
-          }
-
-          const updatedUser: UserAuth = {
-            uid: firebaseUser.uid,
-            isLoggedIn: true,
-            email: firebaseUser.email || '',
-            name: userData.name || '사용자',
-            role: userData.role || 'normal',
-            plan: userData.plan || 'free',
-            credits: userData.credits ?? 30,
-            svgUsage: userData.svgUsage || 0,
-            svgLimit: userData.svgLimit ?? 5,
-            gifUsage: userData.gifUsage || 0,
-            gifLimit: userData.gifLimit ?? 5
-          };
-          setUser(updatedUser);
-          localStorage.setItem('genius_user_cache', JSON.stringify(updatedUser));
-        }
-      } else {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session?.user) {
+        refreshUserState(session.user.id, session.user);
+      } else if (event === 'SIGNED_OUT') {
         setUser(prev => {
           const newState = { ...prev, isLoggedIn: false };
           localStorage.setItem('genius_user_cache', JSON.stringify(newState));
@@ -134,7 +126,11 @@ export const App: React.FC = () => {
         });
       }
     });
-    return () => unsubscribe();
+
+    initAuth();
+    return () => {
+      listener?.subscription.unsubscribe();
+    };
   }, []);
 
   const copyToClipboard = async (text: string) => {
@@ -146,63 +142,100 @@ export const App: React.FC = () => {
 
   const handleSignup = async () => {
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, signupForm.email, signupForm.password);
-      const newUser = userCredential.user;
-      const plan = signupForm.role === 'special' ? 'michina' : 'free';
-      const userData = {
-        uid: newUser.uid,
-        name: signupForm.name,
+      setAuthError('');
+      const { error } = await supabase.auth.signUp({
         email: signupForm.email,
-        role: signupForm.role,
-        plan: plan,
-        credits: plan === 'michina' ? 'unlimited' : 30,
-        svgLimit: plan === 'michina' ? 'unlimited' : 5,
-        svgUsage: 0,
-        gifLimit: plan === 'michina' ? 'unlimited' : 5,
-        gifUsage: 0
-      };
-      await setDoc(doc(db, "users", newUser.uid), userData);
-      alert("회원가입 성공!");
+        password: signupForm.password,
+        options: { data: { name: signupForm.name } },
+      });
+
+      if (error) throw error;
+      alert('회원가입 성공! 이메일 인증 후 로그인해 주세요.');
       setShowSignupModal(false);
-    } catch (error: any) { alert(error.message); }
+      setShowLoginModal(true);
+    } catch (error: any) {
+      setAuthError(error.message || '회원가입에 실패했습니다.');
+      alert(error.message || '회원가입에 실패했습니다.');
+    }
+  };
+
+  const promoteMichinaIfWhitelisted = async (email: string | null, userId: string, currentRole: string) => {
+    if (!email || currentRole !== 'user') return currentRole;
+    const normalized = email.toLowerCase();
+    const { data, error } = await supabase
+      .from('michina_whitelist')
+      .select('email, active')
+      .eq('email', normalized)
+      .eq('active', true)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Whitelist check failed', error);
+      return currentRole;
+    }
+
+    if (data?.email) {
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ role: 'michina' })
+        .eq('id', userId);
+      if (updateError) console.error('Failed to promote to michina', updateError);
+      return 'michina';
+    }
+
+    return currentRole;
   };
 
   const handleLogin = async () => {
     try {
-      const userCredential = await signInWithEmailAndPassword(auth, loginForm.email, loginForm.password);
-      const firebaseUser = userCredential.user;
-      const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
-      if (userDoc.exists()) {
-        const userData = userDoc.data();
-        if (userData.role === 'admin') window.location.href = 'admin.html';
-        else setShowLoginModal(false);
+      setAuthError('');
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: loginForm.email,
+        password: loginForm.password,
+      });
+
+      if (error || !data.user) throw error || new Error('로그인 실패');
+
+      const profile = await fetchProfile(data.user.id);
+      const promotedRole = await promoteMichinaIfWhitelisted(data.user.email, data.user.id, profile.role || 'user');
+      const finalProfile = promotedRole !== profile.role ? { ...profile, role: promotedRole } : profile;
+
+      let allowed = true;
+      let rejectionMessage = '';
+      if (loginForm.role === 'admin' && promotedRole !== 'admin') {
+        allowed = false;
+        rejectionMessage = '관리자 계정이 아닙니다';
+      } else if (loginForm.role === 'special' && !(promotedRole === 'michina' || promotedRole === 'admin')) {
+        allowed = false;
+        rejectionMessage = '미치나 전용 계정이 아닙니다';
       }
-    } catch (error: any) { alert(error.message); }
+
+      if (!allowed) {
+        await supabase.auth.signOut();
+        setAuthError(rejectionMessage || '권한이 없습니다.');
+        alert(rejectionMessage || '권한이 없습니다.');
+        return;
+      }
+
+      const mapped = mapProfileToUserState(finalProfile, data.user);
+      setUser(mapped);
+      localStorage.setItem('genius_user_cache', JSON.stringify(mapped));
+      if (loginForm.role === 'admin') window.location.href = '/admin';
+      else if (loginForm.role === 'special') window.location.href = '/michina';
+      else window.location.href = '/home';
+      setShowLoginModal(false);
+    } catch (error: any) {
+      setAuthError(error?.message || '로그인에 실패했습니다.');
+      alert(error?.message || '로그인에 실패했습니다.');
+    }
   };
 
   const handleGoogleLogin = async () => {
-    try {
-      const result = await signInWithPopup(auth, googleProvider);
-      const firebaseUser = result.user;
-      let userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
-      if (!userDoc.exists()) {
-        const userData = {
-          uid: firebaseUser.uid,
-          name: firebaseUser.displayName || 'User',
-          email: firebaseUser.email || '',
-          role: 'normal', plan: 'free', credits: 30, svgLimit: 5, svgUsage: 0, gifLimit: 5, gifUsage: 0
-        };
-        await setDoc(doc(db, "users", firebaseUser.uid), userData);
-        userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
-      }
-      const userData = userDoc.data();
-      if (userData?.role === 'admin') window.location.href = 'admin.html';
-      else setShowLoginModal(false);
-    } catch (error: any) { alert(error.message); }
+    alert('현재는 이메일 로그인만 지원합니다.');
   };
 
   const handleLogout = async () => {
-    await signOut(auth);
+    await supabase.auth.signOut();
     setUser(p => ({...p, isLoggedIn: false}));
     localStorage.removeItem('genius_user_cache');
   };
@@ -316,8 +349,13 @@ export const App: React.FC = () => {
       if (options.format === 'svg' && user.svgLimit !== 'unlimited') updates.svgUsage = user.svgUsage + targets.length;
       if (options.format === 'gif' && user.gifLimit !== 'unlimited') updates.gifUsage = user.gifUsage + targets.length;
       
-      if (Object.keys(updates).length > 0) {
-        await updateDoc(doc(db, "users", user.uid), updates);
+      if (Object.keys(updates).length > 0 && user.uid) {
+        const payload: any = { credits: updates.credits };
+        if (typeof updates.svgUsage !== 'undefined') payload.svg_usage = updates.svgUsage;
+        if (typeof updates.gifUsage !== 'undefined') payload.gif_usage = updates.gifUsage;
+
+        const { error } = await supabase.from('profiles').update(payload).eq('id', user.uid);
+        if (error) console.error('사용 기록 업데이트 실패', error);
         setUser(prev => ({ ...prev, ...updates }));
       }
     } catch (e: any) {
@@ -649,13 +687,6 @@ export const App: React.FC = () => {
             </button>
             <h3 className="text-3xl font-black mt-4">회원가입</h3>
             <div className="space-y-4">
-              <div className="flex gap-2 p-1 bg-background-light rounded-xl border border-border-color">
-                {(['normal', 'special'] as UserRole[]).map(r => (
-                  <button key={r} onClick={() => setSignupForm(p => ({...p, role: r}))} className={`flex-1 py-2 rounded-lg text-xs font-black transition-all ${signupForm.role === r ? 'bg-primary shadow-sm' : 'text-text-sub'}`}>
-                    {r === 'special' ? '미치나 가입' : '일반 가입'}
-                  </button>
-                ))}
-              </div>
               <input type="text" placeholder="이름" value={signupForm.name} onChange={e => setSignupForm(p => ({...p, name: e.target.value}))} className="w-full p-5 rounded-2xl border border-border-color bg-background-light font-bold" />
               <input type="email" placeholder="이메일" value={signupForm.email} onChange={e => setSignupForm(p => ({...p, email: e.target.value}))} className="w-full p-5 rounded-2xl border border-border-color bg-background-light font-bold" />
               <input type="password" placeholder="비밀번호" value={signupForm.password} onChange={e => setSignupForm(p => ({...p, password: e.target.value}))} className="w-full p-5 rounded-2xl border border-border-color bg-background-light font-bold" />

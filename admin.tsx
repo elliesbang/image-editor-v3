@@ -1,25 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom/client';
-
-// Firebase CDN Imports
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-import { getFirestore, doc, getDoc, setDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-
-const firebaseConfig = {
-  apiKey: "AIzaSyCUJColyeKcWo0CSN-6_k3urHkL2Haq91Q",
-  authDomain: "gen-lang-client-0303289355.firebaseapp.com",
-  projectId: "gen-lang-client-0303289355",
-  storageBucket: "gen-lang-client-0303289355.firebasestorage.app",
-  messagingSenderId: "1059346647906",
-  appId: "1:1059346647906:web:865529f7f4575836262450",
-  measurementId: "G-H9M9C074C5"
-};
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
+import { supabase } from './src/lib/supabaseClient';
 
 const AdminDashboard = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -27,33 +9,59 @@ const AdminDashboard = () => {
   const [whitelist, setWhitelist] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        const userDoc = await getDoc(doc(db, "users", user.uid));
-        if (userDoc.exists() && userDoc.data().role === 'admin') {
-          fetchInitialData();
-        } else {
-          window.location.href = 'index.html';
-        }
-      } else {
-        window.location.href = 'index.html';
-      }
-    });
-  }, []);
+  const fetchProfile = async (userId: string) => {
+    const { data, error } = await supabase.from('profiles').select('role').eq('id', userId).single();
+    if (error) throw error;
+    return data;
+  };
 
   const fetchInitialData = async () => {
     setLoading(true);
-    // Fetch users
-    const usersSnap = await getDocs(collection(db, "users"));
-    setUsers(usersSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-    
-    // Fetch whitelist
-    const configDoc = await getDoc(doc(db, "settings", "whitelist"));
-    if (configDoc.exists()) setWhitelist(configDoc.data().emails || []);
-    
+    const { data: profileData, error: profileError } = await supabase
+      .from('profiles')
+      .select('id, email, role, full_name, name, plan');
+    if (!profileError && profileData) setUsers(profileData);
+
+    const { data: whitelistData, error: whitelistError } = await supabase
+      .from('michina_whitelist')
+      .select('email')
+      .eq('active', true);
+    if (!whitelistError && whitelistData) setWhitelist(whitelistData.map(item => item.email));
+
     setLoading(false);
   };
+
+  useEffect(() => {
+    const ensureAdmin = async () => {
+      const { data } = await supabase.auth.getSession();
+      const sessionUser = data.session?.user;
+      if (!sessionUser) {
+        window.location.href = '/home';
+        return;
+      }
+
+      try {
+        const profile = await fetchProfile(sessionUser.id);
+        if (profile?.role === 'admin') {
+          fetchInitialData();
+        } else {
+          window.location.href = '/home';
+        }
+      } catch (error) {
+        console.error('Failed to verify admin role', error);
+        window.location.href = '/home';
+      }
+    };
+
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT' || !session?.user) {
+        window.location.href = '/home';
+      }
+    });
+
+    ensureAdmin();
+    return () => listener?.subscription.unsubscribe();
+  }, []);
 
   const handleCsvUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -64,8 +72,14 @@ const AdminDashboard = () => {
       const text = event.target?.result as string;
       const emails = text.split(/\r?\n/).map(row => row.trim()).filter(email => email.includes('@'));
       if (emails.length > 0) {
-        await setDoc(doc(db, "settings", "whitelist"), { emails });
-        setWhitelist(emails);
+        const records = emails.map(email => ({ email: email.toLowerCase(), active: true }));
+        const { error } = await supabase.from('michina_whitelist').upsert(records, { onConflict: 'email' });
+        if (error) {
+          console.error('Failed to update whitelist', error);
+          alert('명단 업로드에 실패했습니다.');
+          return;
+        }
+        setWhitelist(records.map(r => r.email));
         alert(`${emails.length}개의 이메일이 미치나 명단에 등록되었습니다.`);
       }
     };
@@ -73,8 +87,8 @@ const AdminDashboard = () => {
   };
 
   const handleLogout = async () => {
-    await signOut(auth);
-    window.location.href = 'index.html';
+    await supabase.auth.signOut();
+    window.location.href = '/home';
   };
 
   if (loading) return <div className="flex h-screen items-center justify-center bg-background"><div className="animate-spin rounded-full h-12 w-12 border-4 border-primary border-t-transparent"></div></div>;
