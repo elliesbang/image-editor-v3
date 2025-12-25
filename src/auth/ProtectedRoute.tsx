@@ -1,21 +1,25 @@
-import { ReactNode, useEffect } from 'react';
+import { ReactNode, useEffect, useMemo } from 'react';
 import { useAuth } from './AuthContext';
 
 interface Props {
   children: ReactNode;
+  allow?: Array<'admin' | 'vod' | 'student'>;
 }
 
-export const ProtectedRoute = ({ children }: Props) => {
-  const { roleReady, role } = useAuth();
+export const ProtectedRoute = ({ children, allow }: Props) => {
+  const { loading, roleReady, role } = useAuth();
+  const allowedRoles = useMemo(() => allow ?? ['admin'], [allow]);
 
   useEffect(() => {
-    if (roleReady && role !== 'admin') {
+    if (loading || !roleReady) return;
+    if (!role || !allowedRoles.includes(role)) {
       window.location.href = '/';
     }
-  }, [roleReady, role]);
+  }, [allowedRoles, loading, roleReady, role]);
 
+  if (loading) return null;
   if (!roleReady) return null;
-  if (role !== 'admin') return null;
+  if (!role || !allowedRoles.includes(role)) return null;
 
   return <>{children}</>;
 };

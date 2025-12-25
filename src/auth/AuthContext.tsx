@@ -7,31 +7,38 @@ type Role = 'admin' | 'student' | 'vod';
 interface AuthContextValue {
   session: Session | null;
   role: Role | null;
+  loading: boolean;
   roleReady: boolean;
   refreshRole: (userIdOverride?: string | null) => Promise<Role | null>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-const mapRole = (value?: string | null): Role => {
-  if (value === 'admin') return 'admin';
-  if (value === 'vod') return 'vod';
+const mapRole = (value?: string | null): Role | null => {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === 'admin') return 'admin';
+  if (normalized === 'vod') return 'vod';
   return 'student';
 };
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [session, setSession] = useState<Session | null>(null);
   const [role, setRole] = useState<Role | null>(null);
+  const [loading, setLoading] = useState(true);
   const [roleReady, setRoleReady] = useState(false);
 
   const fetchRoleForUser = async (userId?: string | null) => {
     if (!userId) {
-      setRole(null);
+      setRole('student');
       setRoleReady(true);
-      return null;
+      setLoading(false);
+      localStorage.removeItem('app_role');
+      return 'student';
     }
 
     setRoleReady(false);
+    setLoading(true);
     try {
       const { data, error } = await supabase
         .from('profiles')
@@ -41,7 +48,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
       if (error) throw error;
       const mapped = mapRole(data?.role);
+      if (!mapped) throw new Error('Invalid role value');
+
       setRole(mapped);
+      setRoleReady(true);
       localStorage.setItem('app_role', mapped);
       return mapped;
     } catch (error) {
@@ -50,25 +60,28 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       localStorage.removeItem('app_role');
       return null;
     } finally {
-      setRoleReady(true);
+      setLoading(false);
     }
   };
 
   useEffect(() => {
     const initAuth = async () => {
+      setLoading(true);
       const { data, error } = await supabase.auth.getSession();
       if (!error) {
         setSession(data.session);
         if (data.session?.user) {
           await fetchRoleForUser(data.session.user.id);
         } else {
-          setRole(null);
+          setRole('student');
           setRoleReady(true);
+          setLoading(false);
           localStorage.removeItem('app_role');
         }
       } else {
-        setRole(null);
+        setRole('student');
         setRoleReady(true);
+        setLoading(false);
       }
     };
 
@@ -76,8 +89,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setSession(nextSession);
 
       if (event === 'SIGNED_OUT') {
-        setRole(null);
+        setRole('student');
         setRoleReady(true);
+        setLoading(false);
         localStorage.removeItem('app_role');
         return;
       }
@@ -85,8 +99,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (nextSession?.user) {
         await fetchRoleForUser(nextSession.user.id);
       } else {
-        setRole(null);
+        setRole('student');
         setRoleReady(true);
+        setLoading(false);
         localStorage.removeItem('app_role');
       }
     });
@@ -101,10 +116,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     () => ({
       session,
       role,
+      loading,
       roleReady,
       refreshRole: (userIdOverride?: string | null) => fetchRoleForUser(userIdOverride ?? session?.user.id),
     }),
-    [session, role, roleReady]
+    [session, role, loading, roleReady]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
