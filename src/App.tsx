@@ -4,6 +4,7 @@ import { ImageData, ProcessingOptions, GeminiAnalysisResponse } from './types';
 import { analyzeImages, generateAIImages } from './services/geminiService';
 import { processImage } from './services/imageProcessor';
 import { supabase } from './lib/supabaseClient';
+import { useAuth } from './auth/AuthContext';
 
 type PlanType = 'free' | 'basic' | 'standard' | 'premium' | 'michina';
 type UserRole = 'special' | 'normal' | 'admin';
@@ -75,6 +76,8 @@ export const App: React.FC = () => {
   const [options, setOptions] = useState<ProcessingOptions>({
     bgRemove: true, autoCrop: true, format: 'png', svgColors: 6, resizeWidth: 1080, noiseLevel: 0, gifMotion: '부드럽게 좌우로 흔들리는 효과'
   });
+
+  const { role, roleReady, refreshRole } = useAuth();
 
   const mapProfileToUserState = (profile: any, supabaseUser: any): UserAuth => {
     const dbRole = (profile?.role || 'user') as 'user' | 'michina' | 'admin';
@@ -235,10 +238,12 @@ export const App: React.FC = () => {
       const mapped = mapProfileToUserState(finalProfile, data.user);
       setUser(mapped);
       localStorage.setItem('genius_user_cache', JSON.stringify(mapped));
-      if (loginForm.role === 'admin') window.location.href = '/admin';
-      else if (loginForm.role === 'special') window.location.href = '/michina';
-      else window.location.href = '/home';
+      const fetchedRole = await refreshRole(data.user.id);
       setShowLoginModal(false);
+      if (fetchedRole === 'admin') {
+        window.location.href = '/admin';
+      } else if (loginForm.role === 'special') window.location.href = '/michina';
+      else window.location.href = '/home';
     } catch (error: any) {
       setAuthError(error?.message || '로그인에 실패했습니다.');
       alert(error?.message || '로그인에 실패했습니다.');
@@ -404,6 +409,12 @@ export const App: React.FC = () => {
             <span className="material-symbols-outlined text-lg">workspace_premium</span>
             업그레이드
           </button>
+          {roleReady && role === 'admin' && (
+            <button onClick={() => window.location.href = '/admin'} className="flex items-center gap-2 px-5 py-2.5 bg-background-light border border-border-color rounded-2xl font-black text-sm">
+              <span className="material-symbols-outlined text-lg">shield_person</span>
+              관리자 대시보드
+            </button>
+          )}
           {user.isLoggedIn ? (
             <button onClick={handleLogout} className="px-5 py-2.5 bg-background-light border border-border-color rounded-2xl font-black text-sm">로그아웃</button>
           ) : (
