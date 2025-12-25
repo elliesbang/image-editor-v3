@@ -15,7 +15,7 @@ interface UserAuth {
   name: string;
   role: UserRole;
   plan: PlanType;
-  credits: number | 'unlimited';
+  credit: number | 'unlimited';
   svgUsage: number;
   svgLimit: number | 'unlimited';
   gifUsage: number;
@@ -41,19 +41,34 @@ export const App: React.FC = () => {
   const [loginForm, setLoginForm] = useState({ email: '', password: '', role: 'normal' as UserRole });
   const [signupForm, setSignupForm] = useState({ name: '', email: '', password: '' });
   const [authError, setAuthError] = useState('');
-  
+
   const [user, setUser] = useState<UserAuth>(() => {
+    const baseUser: UserAuth = {
+      uid: '',
+      isLoggedIn: false,
+      email: '',
+      name: '',
+      role: 'normal',
+      plan: 'free',
+      credit: 30,
+      svgUsage: 0,
+      svgLimit: 5,
+      gifUsage: 0,
+      gifLimit: 5,
+    };
+
     try {
       const saved = localStorage.getItem('genius_user_cache');
-      return saved ? JSON.parse(saved) : {
-        uid: '', isLoggedIn: false, email: '', name: '', role: 'normal',
-        plan: 'free', credits: 30, svgUsage: 0, svgLimit: 5, gifUsage: 0, gifLimit: 5
+      if (!saved) return baseUser;
+
+      const parsed = JSON.parse(saved);
+      return {
+        ...baseUser,
+        ...parsed,
+        credit: parsed.credit ?? baseUser.credit,
       };
     } catch (e) {
-      return {
-        uid: '', isLoggedIn: false, email: '', name: '', role: 'normal',
-        plan: 'free', credits: 30, svgUsage: 0, svgLimit: 5, gifUsage: 0, gifLimit: 5
-      };
+      return baseUser;
     }
   });
 
@@ -72,7 +87,7 @@ export const App: React.FC = () => {
       name: profile?.name || supabaseUser.email || '사용자',
       role: mappedRole,
       plan: profile?.plan || 'free',
-      credits: profile?.credits ?? 30,
+      credit: profile?.credit ?? 30,
       svgUsage: profile?.svg_usage || 0,
       svgLimit: profile?.svg_limit ?? 5,
       gifUsage: profile?.gif_usage || 0,
@@ -83,7 +98,7 @@ export const App: React.FC = () => {
   const fetchProfile = async (userId: string) => {
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, role, email, name, plan, credits, svg_usage, svg_limit, gif_usage, gif_limit')
+      .select('id, role, email, name, plan, credit, svg_usage, svg_limit, gif_usage, gif_limit')
       .eq('id', userId)
       .single();
 
@@ -307,7 +322,7 @@ export const App: React.FC = () => {
     if (files.length === 0) return;
     const targets = files.filter(f => selectedIds.size === 0 || selectedIds.has(f.id));
     
-    if (user.credits !== 'unlimited' && (user.credits as number) < targets.length) {
+    if (user.credit !== 'unlimited' && (user.credit as number) < targets.length) {
       alert("크레딧이 부족합니다.");
       setShowUpgradeModal(true);
       return;
@@ -345,12 +360,12 @@ export const App: React.FC = () => {
       }
 
       const updates: any = {};
-      if (user.credits !== 'unlimited') updates.credits = (user.credits as number) - targets.length;
+      if (user.credit !== 'unlimited') updates.credit = (user.credit as number) - targets.length;
       if (options.format === 'svg' && user.svgLimit !== 'unlimited') updates.svgUsage = user.svgUsage + targets.length;
       if (options.format === 'gif' && user.gifLimit !== 'unlimited') updates.gifUsage = user.gifUsage + targets.length;
-      
+
       if (Object.keys(updates).length > 0 && user.uid) {
-        const payload: any = { credits: updates.credits };
+        const payload: any = { credit: updates.credit };
         if (typeof updates.svgUsage !== 'undefined') payload.svg_usage = updates.svgUsage;
         if (typeof updates.gifUsage !== 'undefined') payload.gif_usage = updates.gifUsage;
 
