@@ -33,53 +33,90 @@ export async function processImage(
   let width = canvas.width;
   let height = canvas.height;
 
-  // 1. Background Removal (Subject Protection Logic)
+  // 1. Background Removal (Upgraded with Connected-Component / Flood Fill to Protect White Subjects)
   if (options.bgRemove) {
     const imageData = ctx.getImageData(0, 0, width, height);
     const data = imageData.data;
-    
-    // 샘플링 영역: 모서리와 테두리 위주로 배경색 추정
-    const bgColors: {r: number, g: number, b: number}[] = [];
-    const inset = 2; // 가장자리에서 약간 안쪽
-    const samples = [
-      {x: inset, y: inset}, {x: width - inset, y: inset},
-      {x: inset, y: height - inset}, {x: width - inset, y: height - inset},
-      {x: Math.floor(width/2), y: inset}, {x: Math.floor(width/2), y: height - inset},
-      {x: inset, y: Math.floor(height/2)}, {x: width - inset, y: Math.floor(height/2)}
-    ];
+    const visited = new Uint8Array(width * height);
+    const queue: number[] = [];
 
-    samples.forEach(p => {
-      const idx = (p.y * width + p.x) * 4;
-      bgColors.push({ r: data[idx], g: data[idx+1], b: data[idx+2] });
-    });
-
+    const getIdx = (x: number, y: number) => (y * width + x) * 4;
     const getDistance = (r1: number, g1: number, b1: number, r2: number, g2: number, b2: number) => {
-      return Math.sqrt(Math.pow(r1-r2, 2) + Math.pow(g1-g2, 2) + Math.pow(b1-b2, 2));
+      return Math.sqrt(Math.pow(r1 - r2, 2) + Math.pow(g1 - g2, 2) + Math.pow(b1 - b2, 2));
     };
 
-    const centerX = width / 2;
-    const centerY = height / 2;
-    const maxDist = Math.sqrt(centerX * centerX + centerY * centerY);
+    // 테두리 픽셀을 순회하며 배경색 추출 및 초기 큐 설정 (상하좌우 끝 2px 영역)
+    const inset = 2;
+    const samplePoints: {x: number, y: number}[] = [];
+    for (let x = 0; x < width; x++) {
+      samplePoints.push({x, y: 0}, {x, y: height - 1});
+    }
+    for (let y = 1; y < height - 1; y++) {
+      samplePoints.push({x: 0, y}, {x: width - 1, y});
+    }
 
-    for (let i = 0; i < data.length; i += 4) {
-      const x = (i / 4) % width;
-      const y = Math.floor((i / 4) / width);
-      const r = data[i], g = data[i+1], b = data[i+2];
-      
-      let minColorDist = 1000;
-      bgColors.forEach(bg => {
-        const d = getDistance(r, g, b, bg.r, bg.g, bg.b);
-        if (d < minColorDist) minColorDist = d;
-      });
+    // 초기 배경 시드 색상들
+    const bgSeeds = samplePoints.map(p => {
+      const idx = getIdx(p.x, p.y);
+      return { r: data[idx], g: data[idx+1], b: data[idx+2] };
+    });
 
-      // 피사체 보호 로직: 중심부에 가까울수록, 색상 거리가 일정 이상이면 배경으로 간주하지 않음
-      const distFromCenter = Math.sqrt(Math.pow(x - centerX, 2) + Math.pow(y - centerY, 2));
-      const centerFactor = distFromCenter / maxDist; // 0 (중심) ~ 1 (가장자리)
-      
-      let threshold = 40 * (0.5 + centerFactor * 0.5); // 가장자리는 관대하게, 중심은 엄격하게
-      
-      if (minColorDist < threshold) {
-        data[i + 3] = 0;
+    // 테두리에서 시작하여 연결된 배경 영역을 탐색 (Flood Fill)
+    // 이 방식은 피사체 내부에 갇힌 하얀색(배경과 같은 색)이 뚫리는 것을 방지합니다.
+    samplePoints.forEach(p => {
+      const vIdx = p.y * width + p.x;
+      if (!visited[vIdx]) {
+        visited[vIdx] = 1;
+        queue.push(p.x, p.y);
+      }
+    });
+
+    let head = 0;
+    const threshold = 35; // 배경색 유사도 임계값
+
+    while (head < queue.length) {
+      const cx = queue[head++];
+      const cy = queue[head++];
+      const cIdx = getIdx(cx, cy);
+      const cr = data[cIdx], cg = data[cIdx+1], cb = data[cIdx+2];
+
+      const neighbors = [
+        {x: cx + 1, y: cy}, {x: cx - 1, y: cy},
+        {x: cx, y: cy + 1}, {x: cx, y: cy - 1}
+      ];
+
+      for (const n of neighbors) {
+        if (n.x >= 0 && n.x < width && n.y >= 0 && n.y < height) {
+          const nVIdx = n.y * width + n.x;
+          if (!visited[nVIdx]) {
+            const nIdx = getIdx(n.x, n.y);
+            const nr = data[nIdx], ng = data[nIdx+1], nb = data[nIdx+2], na = data[nIdx+3];
+            
+            // 색상 유사도 체크 (이미 불투명한 픽셀만 탐색)
+            if (na > 10) {
+              // 현재 픽셀이 초기 배경 시드 색상 중 하나와 유사한지 확인
+              let isBg = false;
+              for (const seed of bgSeeds) {
+                if (getDistance(nr, ng, nb, seed.r, seed.g, seed.b) < threshold) {
+                  isBg = true;
+                  break;
+                }
+              }
+
+              if (isBg) {
+                visited[nVIdx] = 1;
+                queue.push(n.x, n.y);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 탐색된 배경 영역만 투명화
+    for (let i = 0; i < width * height; i++) {
+      if (visited[i]) {
+        data[i * 4 + 3] = 0;
       }
     }
     ctx.putImageData(imageData, 0, 0);

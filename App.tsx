@@ -4,7 +4,7 @@ import { ImageData, ProcessingOptions, GeminiAnalysisResponse } from './types';
 import { analyzeImages, generateAIImages } from './geminiService';
 import { processImage } from './imageProcessor';
 
-// Firebase SDK Imports
+// Firebase SDK Imports (CDN)
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
 import { 
   getAuth, 
@@ -24,12 +24,13 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyCUJColyeKcWo0CSN-6_k3urHkL2Haq91Q",
+  authDomain: "gen-lang-client-0303289355.firebaseapp.com",
+  projectId: "gen-lang-client-0303289355",
+  storageBucket: "gen-lang-client-0303289355.firebasestorage.app",
+  messagingSenderId: "1059346647906",
+  appId: "1:1059346647906:web:865529f7f4575836262450",
+  measurementId: "G-H9M9C074C5"
 };
 
 const app = initializeApp(firebaseConfig);
@@ -38,7 +39,7 @@ const db = getFirestore(app);
 const googleProvider = new GoogleAuthProvider();
 
 // 미치나 승급 허용 명단
-const MICHINA_WHITELIST = ['test@test.com', 'michina@genius.com', 'challenge@pro.com'];
+const MICHINA_WHITELIST = ['test@test.com', 'michina@genius.com', 'challenge@pro.com', 'ellie@elliesbang.kr'];
 
 type PlanType = 'free' | 'basic' | 'standard' | 'premium' | 'michina';
 type UserRole = 'special' | 'normal' | 'admin';
@@ -110,9 +111,6 @@ const App: React.FC = () => {
             extraFeatureUsage: userData.extraFeatureUsage || 0,
             extraFeatureLimit: userData.extraFeatureLimit || 5
           });
-          if (userData.role === 'admin' && window.location.pathname !== '/admin') {
-            window.location.href = '/admin';
-          }
         }
       } else {
         setUser(prev => ({ ...prev, isLoggedIn: false }));
@@ -120,6 +118,15 @@ const App: React.FC = () => {
     });
     return () => unsubscribe();
   }, []);
+
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      alert("클립보드에 복사되었습니다.");
+    } catch (err) {
+      console.error('Failed to copy: ', err);
+    }
+  };
 
   const handleSignup = async () => {
     try {
@@ -147,11 +154,18 @@ const App: React.FC = () => {
       const userCredential = await signInWithEmailAndPassword(auth, loginForm.email, loginForm.password);
       const firebaseUser = userCredential.user;
       const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
-      if (userDoc.exists() && userDoc.data().role === 'admin') {
-        window.location.href = '/admin';
+      
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        if (userData.role === 'admin') {
+          window.location.href = 'admin.html';
+        } else {
+          window.location.href = 'index.html';
+        }
       } else {
-        setShowLoginModal(false);
+        window.location.href = 'index.html';
       }
+      setShowLoginModal(false);
     } catch (error: any) { alert(error.message); }
   };
 
@@ -159,7 +173,8 @@ const App: React.FC = () => {
     try {
       const result = await signInWithPopup(auth, googleProvider);
       const firebaseUser = result.user;
-      const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
+      let userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
+      
       if (!userDoc.exists()) {
         const plan = loginForm.role === 'special' ? 'michina' : 'free';
         const userData = {
@@ -173,6 +188,14 @@ const App: React.FC = () => {
           extraFeatureUsage: 0
         };
         await setDoc(doc(db, "users", firebaseUser.uid), userData);
+        userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
+      }
+      
+      const userData = userDoc.data();
+      if (userData?.role === 'admin') {
+        window.location.href = 'admin.html';
+      } else {
+        window.location.href = 'index.html';
       }
       setShowLoginModal(false);
     } catch (error: any) { alert(error.message); }
@@ -180,7 +203,7 @@ const App: React.FC = () => {
 
   const handleLogout = async () => {
     await signOut(auth);
-    window.location.href = '/';
+    window.location.href = 'index.html';
   };
 
   const handleFiles = (incomingFiles: File[]) => {
@@ -191,10 +214,6 @@ const App: React.FC = () => {
     setFiles(prev => [...prev, ...newFiles]);
   };
 
-  /**
-   * AI Image Generation handler
-   * Uses Gemini to generate images based on prompt and adds them to the file list.
-   */
   const handleGenerateImage = async () => {
     if (!generationPrompt.trim() || isGenerating) return;
     
@@ -202,7 +221,6 @@ const App: React.FC = () => {
     try {
       const imageUrls = await generateAIImages(generationPrompt);
       const newFiles: ImageData[] = await Promise.all(imageUrls.map(async (url) => {
-        // Convert data URL to File object to simulate user upload
         const response = await fetch(url);
         const blob = await response.blob();
         const file = new File([blob], `ai_generated_${Date.now()}_${Math.random().toString(36).substring(7)}.png`, { type: 'image/png' });
@@ -229,7 +247,6 @@ const App: React.FC = () => {
     if (files.length === 0) return;
     const targets = files.filter(f => selectedIds.size === 0 || selectedIds.has(f.id));
     
-    // 크레딧 체크
     if (user.credits !== 'unlimited' && (user.credits as number) < targets.length) {
       alert("크레딧이 부족합니다. 업그레이드 해주세요.");
       setShowUpgradeModal(true);
@@ -260,7 +277,7 @@ const App: React.FC = () => {
         
         setFiles(prev => prev.map(f => f.id === target.id ? {
           ...f, status: 'completed', result: {
-            ...result, title: fileAnalysis?.title || '가공 이미지', keywords: fileAnalysis?.keywords || [], format: options.format
+            ...result, title: fileAnalysis?.title || '가공 이미지', keywords: fileAnalysis?.keywords || [], format: options.format, size: ""
           }
         } : f));
       }
@@ -270,6 +287,17 @@ const App: React.FC = () => {
       }
     } catch (e) { alert("처리 오류 발생"); }
     finally { setIsProcessing(false); }
+  };
+
+  const downloadAll = () => {
+    const completed = files.filter(f => f.status === 'completed' && f.result);
+    if (completed.length === 0) return;
+    
+    completed.forEach((f, index) => {
+      setTimeout(() => {
+        downloadResult(f);
+      }, index * 200); // 브라우저 다운로드 지연 방지
+    });
   };
 
   const getPrice = (monthly: number) => {
@@ -545,27 +573,91 @@ const App: React.FC = () => {
         </section>
 
         {files.some(f => f.status === 'completed') && (
-          <section className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-20">
-            {files.filter(f => f.status === 'completed' && f.result).map(f => (
-              <div key={f.id} className="bg-surface rounded-3xl p-6 border border-border-color shadow-soft flex flex-col gap-5">
-                <div className="flex gap-5">
-                  <div className="w-32 h-32 bg-white rounded-2xl overflow-hidden border border-border-color flex items-center justify-center p-2 relative group shadow-inner">
-                    <img src={f.result?.processedUrl} className="max-h-full max-w-full object-contain" />
-                    <button onClick={() => downloadResult(f)} className="absolute inset-0 bg-black/40 text-white opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all"><span className="material-symbols-outlined text-3xl">download</span></button>
+          <div className="space-y-6 pb-20">
+            {/* Common Keywords Section */}
+            {commonKeywords.length > 0 && (
+              <section className="bg-surface rounded-3xl p-8 border border-border-color shadow-soft space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="flex justify-between items-center">
+                  <h3 className="text-xl font-black flex items-center gap-2">
+                    <span className="material-symbols-outlined text-primary">sell</span>
+                    공통 SEO 키워드 (미리캔버스 최적화)
+                  </h3>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={downloadAll}
+                      className="text-xs font-black bg-primary px-4 py-2 rounded-xl border border-primary-hover hover:bg-primary-hover transition-all active:scale-95"
+                    >
+                      전체 다운로드
+                    </button>
+                    <button 
+                      onClick={() => copyToClipboard(commonKeywords.join(', '))}
+                      className="text-xs font-black bg-background-light px-4 py-2 rounded-xl border border-border-color hover:border-primary transition-all active:scale-95"
+                    >
+                      전체 키워드 복사
+                    </button>
                   </div>
-                  <div className="flex-1 flex flex-col justify-center gap-2">
-                    <h4 className="text-sm font-black line-clamp-1">{f.result?.title}</h4>
-                    <div className="flex flex-wrap gap-1 items-center">
-                      <span className="text-[10px] font-black bg-primary px-2 py-0.5 rounded-md uppercase">{f.result?.format}</span>
-                      {f.result?.svgColorsList && f.result.svgColorsList.map((c, i) => (
-                        <input key={i} type="color" value={c} onChange={(e) => handleUpdateSvgColor(f.id, c, e.target.value)} className="size-5 rounded-full border border-border-color cursor-pointer appearance-none overflow-hidden" />
-                      ))}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {commonKeywords.map((k, i) => (
+                    <span key={i} className="text-xs font-bold px-3 py-1.5 bg-background-light rounded-full border border-border-color text-text-main shadow-inner">
+                      #{k}
+                    </span>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Individual File Results */}
+            <section className="grid grid-cols-1 gap-6">
+              {files.filter(f => f.status === 'completed' && f.result).map(f => (
+                <div key={f.id} className="bg-surface rounded-3xl p-8 border border-border-color shadow-soft flex flex-col md:flex-row gap-8 animate-in fade-in zoom-in-95 duration-300">
+                  {/* Image Preview Left */}
+                  <div className="w-full md:w-48 aspect-square bg-white rounded-2xl overflow-hidden border border-border-color flex items-center justify-center p-4 relative group shadow-inner shrink-0">
+                    <img src={f.result?.processedUrl} className="max-h-full max-w-full object-contain" />
+                    <button onClick={() => downloadResult(f)} className="absolute inset-0 bg-black/40 text-white opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all">
+                      <span className="material-symbols-outlined text-3xl">download</span>
+                    </button>
+                  </div>
+
+                  {/* Info Right */}
+                  <div className="flex-1 space-y-6">
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center">
+                        <label className="text-[10px] font-black text-text-sub uppercase tracking-wider">가공된 제목 (미리캔버스 최적화)</label>
+                        <button onClick={() => copyToClipboard(f.result?.title || '')} className="text-[10px] font-black text-primary-hover hover:underline transition-all active:scale-95">제목 복사</button>
+                      </div>
+                      <h4 className="text-lg font-black leading-tight">{f.result?.title}</h4>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="flex justify-between items-center">
+                        <label className="text-[10px] font-black text-text-sub uppercase tracking-wider">이미지 키워드</label>
+                        <button onClick={() => copyToClipboard(f.result?.keywords.join(', ') || '')} className="text-[10px] font-black text-primary-hover hover:underline transition-all active:scale-95">키워드 복사</button>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {f.result?.keywords.map((k, i) => (
+                          <span key={i} className="text-[11px] font-bold px-2.5 py-1 bg-background-light rounded-lg border border-border-color text-text-main">
+                            {k}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 pt-2">
+                      <span className="text-[10px] font-black bg-primary px-3 py-1 rounded-md uppercase tracking-wider">{f.result?.format}</span>
+                      {f.result?.svgColorsList && (
+                        <div className="flex gap-1.5">
+                          {f.result.svgColorsList.map((c, i) => (
+                            <input key={i} type="color" value={c} onChange={(e) => handleUpdateSvgColor(f.id, c, e.target.value)} className="size-6 rounded-full border border-border-color cursor-pointer appearance-none overflow-hidden transition-transform hover:scale-110" />
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </section>
+              ))}
+            </section>
+          </div>
         )}
       </main>
 
