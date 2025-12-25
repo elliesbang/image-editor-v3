@@ -23,19 +23,6 @@ import {
   updateDoc
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-// AI Studio API Key Helper
-// We define the AIStudio interface to resolve type clashing and identical modifier issues on Window.
-interface AIStudio {
-  hasSelectedApiKey: () => Promise<boolean>;
-  openSelectKey: () => Promise<void>;
-}
-
-declare global {
-  interface Window {
-    readonly aistudio: AIStudio;
-  }
-}
-
 const firebaseConfig = {
   apiKey: "AIzaSyCUJColyeKcWo0CSN-6_k3urHkL2Haq91Q",
   authDomain: "gen-lang-client-0303289355.firebaseapp.com",
@@ -68,7 +55,7 @@ interface UserAuth {
   gifLimit: number | 'unlimited';
 }
 
-const App: React.FC = () => {
+export const App: React.FC = () => {
   const [files, setFiles] = useState<ImageData[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isProcessing, setIsProcessing] = useState(false);
@@ -87,9 +74,19 @@ const App: React.FC = () => {
   const [loginForm, setLoginForm] = useState({ email: '', password: '', role: 'normal' as UserRole });
   const [signupForm, setSignupForm] = useState({ name: '', email: '', password: '', role: 'normal' as UserRole });
   
-  const [user, setUser] = useState<UserAuth>({
-    uid: '', isLoggedIn: false, email: '', name: '', role: 'normal',
-    plan: 'free', credits: 30, svgUsage: 0, svgLimit: 5, gifUsage: 0, gifLimit: 5
+  const [user, setUser] = useState<UserAuth>(() => {
+    try {
+      const saved = localStorage.getItem('genius_user_cache');
+      return saved ? JSON.parse(saved) : {
+        uid: '', isLoggedIn: false, email: '', name: '', role: 'normal',
+        plan: 'free', credits: 30, svgUsage: 0, svgLimit: 5, gifUsage: 0, gifLimit: 5
+      };
+    } catch (e) {
+      return {
+        uid: '', isLoggedIn: false, email: '', name: '', role: 'normal',
+        plan: 'free', credits: 30, svgUsage: 0, svgLimit: 5, gifUsage: 0, gifLimit: 5
+      };
+    }
   });
 
   const [options, setOptions] = useState<ProcessingOptions>({
@@ -113,7 +110,7 @@ const App: React.FC = () => {
             }
           }
 
-          setUser({
+          const updatedUser: UserAuth = {
             uid: firebaseUser.uid,
             isLoggedIn: true,
             email: firebaseUser.email || '',
@@ -125,10 +122,16 @@ const App: React.FC = () => {
             svgLimit: userData.svgLimit ?? 5,
             gifUsage: userData.gifUsage || 0,
             gifLimit: userData.gifLimit ?? 5
-          });
+          };
+          setUser(updatedUser);
+          localStorage.setItem('genius_user_cache', JSON.stringify(updatedUser));
         }
       } else {
-        setUser(prev => ({ ...prev, isLoggedIn: false }));
+        setUser(prev => {
+          const newState = { ...prev, isLoggedIn: false };
+          localStorage.setItem('genius_user_cache', JSON.stringify(newState));
+          return newState;
+        });
       }
     });
     return () => unsubscribe();
@@ -201,6 +204,7 @@ const App: React.FC = () => {
   const handleLogout = async () => {
     await signOut(auth);
     setUser(p => ({...p, isLoggedIn: false}));
+    localStorage.removeItem('genius_user_cache');
   };
 
   const handleFiles = (incomingFiles: File[]) => {
@@ -214,15 +218,25 @@ const App: React.FC = () => {
   const handleGenerateImage = async () => {
     if (!generationPrompt.trim() || isGenerating) return;
 
-    // Gemini 3 Pro 모델 사용을 위해 유료 API 키 선택 확인
-    const hasKey = await window.aistudio.hasSelectedApiKey();
-    if (!hasKey) {
-      await window.aistudio.openSelectKey();
+    // TypeError: Cannot read properties of undefined (reading 'hasSelectedApiKey') 해결을 위한 방어 코드
+    const aiStudio = (window as any).aistudio;
+    if (!aiStudio) {
+      alert("AI 설정(aistudio)이 로딩 중입니다. 잠시 후 다시 시도해 주세요.");
+      return;
+    }
+
+    try {
+      const hasKey = await aiStudio.hasSelectedApiKey();
+      if (!hasKey) {
+        await aiStudio.openSelectKey();
+        // 키 선택 창을 연 후에는 비동기적으로 진행되므로 가이드라인에 따라 즉시 진행을 시도합니다.
+      }
+    } catch (e: any) {
+      console.error("API Key check error:", e);
     }
 
     setIsGenerating(true);
     try {
-      // 선택된 이미지가 있다면 참조 이미지로 사용 (배경 생성/편집 기능)
       let referenceBase64: string | undefined;
       const selectedFile = files.find(f => selectedIds.has(f.id));
       if (selectedFile) {
@@ -243,14 +257,17 @@ const App: React.FC = () => {
       setFiles(prev => [...prev, ...newFiles]);
       setGenerationPrompt('');
     } catch (e: any) {
-      // If the request fails with an error message containing "Requested entity was not found.", 
-      // reset key selection and prompt the user to select a key again via openSelectKey().
-      if (e.message?.includes("Requested entity was not found")) {
-        await window.aistudio.openSelectKey();
+      console.error("Generation error:", e);
+      // API_KEY_INVALID 또는 Requested entity was not found 에러 처리
+      if (e.message?.includes("Requested entity was not found") || e.message?.includes("API_KEY_INVALID")) {
+        alert("유효한 API 키가 없습니다. 유료 API 키를 선택해 주세요.");
+        if (aiStudio.openSelectKey) await aiStudio.openSelectKey();
+      } else {
+        alert("이미지 생성 실패. 네트워크 또는 설정을 확인해 주세요.");
       }
-      alert("이미지 생성 실패"); 
+    } finally {
+      setIsGenerating(false);
     }
-    finally { setIsGenerating(false); }
   };
 
   const processAll = async () => {
@@ -303,14 +320,11 @@ const App: React.FC = () => {
         await updateDoc(doc(db, "users", user.uid), updates);
         setUser(prev => ({ ...prev, ...updates }));
       }
-
     } catch (e: any) {
-      if (e.message?.includes("Requested entity was not found")) {
-        await window.aistudio.openSelectKey();
-      }
       alert("처리 오류");
+    } finally {
+      setIsProcessing(false);
     }
-    finally { setIsProcessing(false); }
   };
 
   const downloadAll = () => {
@@ -650,5 +664,3 @@ const App: React.FC = () => {
     </div>
   );
 };
-
-export default App;
