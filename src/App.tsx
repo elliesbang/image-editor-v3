@@ -204,6 +204,14 @@ export const App: React.FC = () => {
     return currentRole;
   };
 
+  const closeAllModals = () => {
+    setShowLoginModal(false);
+    setShowSignupModal(false);
+    setShowUpgradeModal(false);
+    setShowTermsModal(false);
+    setShowPrivacyModal(false);
+  };
+
   const handleLogin = async () => {
     try {
       setAuthError('');
@@ -239,7 +247,7 @@ export const App: React.FC = () => {
       setUser(mapped);
       localStorage.setItem('genius_user_cache', JSON.stringify(mapped));
       const fetchedRole = await refreshRole(data.user.id);
-      setShowLoginModal(false);
+      closeAllModals();
       if (fetchedRole === 'admin') {
         window.location.href = '/admin';
       } else if (loginForm.role === 'special') window.location.href = '/michina';
@@ -255,6 +263,8 @@ export const App: React.FC = () => {
   };
 
   const handleLogout = async () => {
+    closeAllModals();
+    console.log('로그아웃 버튼 클릭됨');
     await supabase.auth.signOut();
     setUser({
       uid: '',
@@ -422,9 +432,9 @@ export const App: React.FC = () => {
             </button>
           )}
           {user.isLoggedIn ? (
-            <button onClick={handleLogout} className="px-5 py-2.5 bg-background-light border border-border-color rounded-2xl font-black text-sm">로그아웃</button>
+            <button type="button" onClick={handleLogout} className="px-5 py-2.5 bg-background-light border border-border-color rounded-2xl font-black text-sm">로그아웃</button>
           ) : (
-            <button onClick={() => setShowLoginModal(true)} className="px-5 py-2.5 bg-background-light border border-border-color rounded-2xl font-black text-sm">로그인</button>
+            <button type="button" onClick={() => setShowLoginModal(true)} className="px-5 py-2.5 bg-background-light border border-border-color rounded-2xl font-black text-sm">로그인</button>
           )}
         </div>
       </header>
@@ -599,9 +609,9 @@ export const App: React.FC = () => {
       </footer>
 
       {showUpgradeModal && (
-        <div className="fixed inset-0 z-[140] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-[2.5rem] shadow-2xl relative p-8 md:p-12">
-            <button onClick={() => setShowUpgradeModal(false)} className="absolute top-8 right-8 text-text-sub hover:text-text-main transition-colors">
+        <div className="fixed inset-0 z-[140] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200" onClick={closeAllModals}>
+          <div className="bg-white w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-[2.5rem] shadow-2xl relative p-8 md:p-12" onClick={e => e.stopPropagation()}>
+            <button onClick={closeAllModals} className="absolute top-8 right-8 text-text-sub hover:text-text-main transition-colors">
               <span className="material-symbols-outlined text-3xl">close</span>
             </button>
             <div className="text-center space-y-2 mb-10">
@@ -668,9 +678,9 @@ export const App: React.FC = () => {
       )}
 
       {showLoginModal && (
-        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-          <div className="bg-surface w-full max-w-md rounded-[2.5rem] shadow-2xl p-10 space-y-6 relative">
-            <button onClick={() => setShowLoginModal(false)} className="absolute top-8 right-8 text-text-sub hover:text-text-main"><span className="material-symbols-outlined text-2xl">close</span></button>
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={closeAllModals}>
+          <div className="bg-surface w-full max-w-md rounded-[2.5rem] shadow-2xl p-10 space-y-6 relative" onClick={e => e.stopPropagation()}>
+            <button onClick={closeAllModals} className="absolute top-8 right-8 text-text-sub hover:text-text-main"><span className="material-symbols-outlined text-2xl">close</span></button>
             <h3 className="text-3xl font-black">로그인</h3>
             <div className="space-y-4">
               <div className="flex gap-2 p-1 bg-background-light rounded-xl border border-border-color">
@@ -697,8 +707,8 @@ export const App: React.FC = () => {
       )}
 
       {showSignupModal && (
-        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-          <div className="bg-surface w-full max-w-md rounded-[2.5rem] shadow-2xl p-10 space-y-6 relative">
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={closeAllModals}>
+          <div className="bg-surface w-full max-w-md rounded-[2.5rem] shadow-2xl p-10 space-y-6 relative" onClick={e => e.stopPropagation()}>
             <button onClick={() => {setShowSignupModal(false); setShowLoginModal(true);}} className="absolute top-8 left-8 text-text-sub hover:text-text-main flex items-center gap-1">
               <span className="material-symbols-outlined text-xl">arrow_back</span>
               <span className="text-xs font-black">로그인으로</span>
@@ -715,9 +725,9 @@ export const App: React.FC = () => {
       )}
 
       {showTermsModal && (
-        <div className="fixed inset-0 z-[160] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-white w-full max-w-2xl max-h-[80vh] overflow-y-auto rounded-[2rem] p-10 space-y-4 shadow-2xl relative">
-            <button onClick={() => setShowTermsModal(false)} className="absolute top-8 right-8 text-text-sub hover:text-text-main"><span className="material-symbols-outlined">close</span></button>
+        <div className="fixed inset-0 z-[160] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={closeAllModals}>
+          <div className="bg-white w-full max-w-2xl max-h-[80vh] overflow-y-auto rounded-[2rem] p-10 space-y-4 shadow-2xl relative" onClick={e => e.stopPropagation()}>
+            <button onClick={closeAllModals} className="absolute top-8 right-8 text-text-sub hover:text-text-main"><span className="material-symbols-outlined">close</span></button>
             <h2 className="text-3xl font-black mb-6">이용약관</h2>
             <div className="text-sm font-bold text-text-sub space-y-5 leading-relaxed">
               <p>제1조 (목적) 본 약관은 ImageGenius가 제공하는 이미지 편집 서비스의 이용 조건 및 절차를 규정합니다.</p>
@@ -725,15 +735,15 @@ export const App: React.FC = () => {
               <p>제3조 (저작권) 서비스로 생성된 결과물의 저작권은 사용자에게 귀속되나, AI 모델의 특성상 동일하거나 유사한 결과가 다른 사용자에게 생성될 수 있음을 동의합니다.</p>
               <p>제4조 (금지사항) 불법적인 성인물 생성, 타인의 명예 훼손, 지적 재산권 침해 도구로 서비스를 사용하는 것을 엄격히 금지합니다.</p>
             </div>
-            <button onClick={() => setShowTermsModal(false)} className="w-full py-4 bg-primary rounded-2xl font-black mt-8 text-lg border-b-4 border-primary-hover">확인했습니다</button>
+            <button onClick={closeAllModals} className="w-full py-4 bg-primary rounded-2xl font-black mt-8 text-lg border-b-4 border-primary-hover">확인했습니다</button>
           </div>
         </div>
       )}
 
       {showPrivacyModal && (
-        <div className="fixed inset-0 z-[160] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-white w-full max-w-2xl max-h-[80vh] overflow-y-auto rounded-[2rem] p-10 space-y-4 shadow-2xl relative">
-            <button onClick={() => setShowPrivacyModal(false)} className="absolute top-8 right-8 text-text-sub hover:text-text-main"><span className="material-symbols-outlined">close</span></button>
+        <div className="fixed inset-0 z-[160] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={closeAllModals}>
+          <div className="bg-white w-full max-w-2xl max-h-[80vh] overflow-y-auto rounded-[2rem] p-10 space-y-4 shadow-2xl relative" onClick={e => e.stopPropagation()}>
+            <button onClick={closeAllModals} className="absolute top-8 right-8 text-text-sub hover:text-text-main"><span className="material-symbols-outlined">close</span></button>
             <h2 className="text-3xl font-black mb-6">개인정보처리방침</h2>
             <div className="text-sm font-bold text-text-sub space-y-5 leading-relaxed">
               <p>1. 수집하는 개인정보: 이메일 주소, 이름, 계정 역할(관리자, 미치나, 일반), 서비스 이용 기록.</p>
@@ -741,7 +751,7 @@ export const App: React.FC = () => {
               <p>3. 개인정보의 보유 및 이용기간: 회원 탈퇴 시까지 또는 법령이 정한 기간 동안 보관합니다.</p>
               <p>4. 개인정보의 파기: 수집 목적이 달성되면 해당 정보를 지체 없이 파기합니다.</p>
             </div>
-            <button onClick={() => setShowPrivacyModal(false)} className="w-full py-4 bg-primary rounded-2xl font-black mt-8 text-lg border-b-4 border-primary-hover">확인했습니다</button>
+            <button onClick={closeAllModals} className="w-full py-4 bg-primary rounded-2xl font-black mt-8 text-lg border-b-4 border-primary-hover">확인했습니다</button>
           </div>
         </div>
       )}
