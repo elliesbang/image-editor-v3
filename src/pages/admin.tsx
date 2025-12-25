@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom/client';
-import { supabase } from './src/lib/supabaseClient';
+import { supabase } from '../lib/supabaseClient';
 
 const AdminDashboard = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -19,7 +19,7 @@ const AdminDashboard = () => {
     setLoading(true);
     const { data: profileData, error: profileError } = await supabase
       .from('profiles')
-      .select('id, email, role, full_name, name, plan');
+      .select('id, email, role, name, plan');
     if (!profileError && profileData) setUsers(profileData);
 
     const { data: whitelistData, error: whitelistError } = await supabase
