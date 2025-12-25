@@ -38,9 +38,6 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const googleProvider = new GoogleAuthProvider();
 
-// 미치나 승급 허용 명단
-const MICHINA_WHITELIST = ['test@test.com', 'michina@genius.com', 'challenge@pro.com', 'ellie@elliesbang.kr'];
-
 type PlanType = 'free' | 'basic' | 'standard' | 'premium' | 'michina';
 type UserRole = 'special' | 'normal' | 'admin';
 
@@ -52,8 +49,10 @@ interface UserAuth {
   role: UserRole;
   plan: PlanType;
   credits: number | 'unlimited';
-  extraFeatureUsage: number;
-  extraFeatureLimit: number | 'unlimited';
+  svgUsage: number;
+  svgLimit: number | 'unlimited';
+  gifUsage: number;
+  gifLimit: number | 'unlimited';
 }
 
 const App: React.FC = () => {
@@ -72,12 +71,12 @@ const App: React.FC = () => {
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
   
-  const [loginForm, setLoginForm] = useState({ email: '', password: '', role: 'normal' as UserRole });
-  const [signupForm, setSignupForm] = useState({ name: '', email: '', password: '', role: 'normal' as UserRole });
+  const [loginForm, setLoginForm] = useState({ email: '', password: '' });
+  const [signupForm, setSignupForm] = useState({ name: '', email: '', password: '' });
   
   const [user, setUser] = useState<UserAuth>({
     uid: '', isLoggedIn: false, email: '', name: '', role: 'normal',
-    plan: 'free', credits: 30, extraFeatureUsage: 0, extraFeatureLimit: 5
+    plan: 'free', credits: 30, svgUsage: 0, svgLimit: 5, gifUsage: 0, gifLimit: 5
   });
 
   const [options, setOptions] = useState<ProcessingOptions>({
@@ -89,14 +88,15 @@ const App: React.FC = () => {
       if (firebaseUser) {
         const userDocRef = doc(db, "users", firebaseUser.uid);
         const userDoc = await getDoc(userDocRef);
+        const configDoc = await getDoc(doc(db, "settings", "whitelist"));
+        const whitelist: string[] = configDoc.exists() ? configDoc.data().emails || [] : [];
+
         if (userDoc.exists()) {
           let userData = userDoc.data();
-          
-          // 미치나 등급 자동 승급 체크
-          if (userData.role !== 'admin' && MICHINA_WHITELIST.includes(firebaseUser.email || '')) {
+          if (userData.role !== 'admin' && whitelist.includes(firebaseUser.email || '')) {
             if (userData.plan !== 'michina') {
-              await updateDoc(userDocRef, { plan: 'michina', credits: 'unlimited', extraFeatureLimit: 'unlimited' });
-              userData = { ...userData, plan: 'michina', credits: 'unlimited', extraFeatureLimit: 'unlimited' };
+              await updateDoc(userDocRef, { plan: 'michina', credits: 'unlimited', svgLimit: 'unlimited', gifLimit: 'unlimited' });
+              userData = { ...userData, plan: 'michina', credits: 'unlimited', svgLimit: 'unlimited', gifLimit: 'unlimited' };
             }
           }
 
@@ -107,9 +107,11 @@ const App: React.FC = () => {
             name: userData.name || '사용자',
             role: userData.role || 'normal',
             plan: userData.plan || 'free',
-            credits: userData.credits || 30,
-            extraFeatureUsage: userData.extraFeatureUsage || 0,
-            extraFeatureLimit: userData.extraFeatureLimit || 5
+            credits: userData.credits ?? 30,
+            svgUsage: userData.svgUsage || 0,
+            svgLimit: userData.svgLimit ?? 5,
+            gifUsage: userData.gifUsage || 0,
+            gifLimit: userData.gifLimit ?? 5
           });
         }
       } else {
@@ -123,25 +125,24 @@ const App: React.FC = () => {
     try {
       await navigator.clipboard.writeText(text);
       alert("클립보드에 복사되었습니다.");
-    } catch (err) {
-      console.error('Failed to copy: ', err);
-    }
+    } catch (err) { console.error('Failed to copy: ', err); }
   };
 
   const handleSignup = async () => {
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, signupForm.email, signupForm.password);
       const newUser = userCredential.user;
-      const plan = signupForm.role === 'special' ? 'michina' : 'free';
       const userData = {
         uid: newUser.uid,
         name: signupForm.name,
         email: signupForm.email,
-        role: signupForm.role,
-        plan: plan,
-        credits: plan === 'michina' ? 'unlimited' : 30,
-        extraFeatureLimit: plan === 'michina' ? 'unlimited' : 5,
-        extraFeatureUsage: 0
+        role: 'normal',
+        plan: 'free',
+        credits: 30,
+        svgLimit: 5,
+        svgUsage: 0,
+        gifLimit: 5,
+        gifUsage: 0
       };
       await setDoc(doc(db, "users", newUser.uid), userData);
       alert("회원가입 성공!");
@@ -154,18 +155,11 @@ const App: React.FC = () => {
       const userCredential = await signInWithEmailAndPassword(auth, loginForm.email, loginForm.password);
       const firebaseUser = userCredential.user;
       const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
-      
       if (userDoc.exists()) {
         const userData = userDoc.data();
-        if (userData.role === 'admin') {
-          window.location.href = 'admin.html';
-        } else {
-          window.location.href = 'index.html';
-        }
-      } else {
-        window.location.href = 'index.html';
+        if (userData.role === 'admin') window.location.href = 'admin.html';
+        else setShowLoginModal(false);
       }
-      setShowLoginModal(false);
     } catch (error: any) { alert(error.message); }
   };
 
@@ -174,36 +168,25 @@ const App: React.FC = () => {
       const result = await signInWithPopup(auth, googleProvider);
       const firebaseUser = result.user;
       let userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
-      
       if (!userDoc.exists()) {
-        const plan = loginForm.role === 'special' ? 'michina' : 'free';
         const userData = {
           uid: firebaseUser.uid,
           name: firebaseUser.displayName || 'User',
           email: firebaseUser.email || '',
-          role: loginForm.role,
-          plan: plan,
-          credits: plan === 'michina' ? 'unlimited' : 30,
-          extraFeatureLimit: plan === 'michina' ? 'unlimited' : 5,
-          extraFeatureUsage: 0
+          role: 'normal', plan: 'free', credits: 30, svgLimit: 5, svgUsage: 0, gifLimit: 5, gifUsage: 0
         };
         await setDoc(doc(db, "users", firebaseUser.uid), userData);
         userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
       }
-      
       const userData = userDoc.data();
-      if (userData?.role === 'admin') {
-        window.location.href = 'admin.html';
-      } else {
-        window.location.href = 'index.html';
-      }
-      setShowLoginModal(false);
+      if (userData?.role === 'admin') window.location.href = 'admin.html';
+      else setShowLoginModal(false);
     } catch (error: any) { alert(error.message); }
   };
 
   const handleLogout = async () => {
     await signOut(auth);
-    window.location.href = 'index.html';
+    setUser(p => ({...p, isLoggedIn: false}));
   };
 
   const handleFiles = (incomingFiles: File[]) => {
@@ -216,104 +199,81 @@ const App: React.FC = () => {
 
   const handleGenerateImage = async () => {
     if (!generationPrompt.trim() || isGenerating) return;
-    
     setIsGenerating(true);
     try {
       const imageUrls = await generateAIImages(generationPrompt);
       const newFiles: ImageData[] = await Promise.all(imageUrls.map(async (url) => {
         const response = await fetch(url);
         const blob = await response.blob();
-        const file = new File([blob], `ai_generated_${Date.now()}_${Math.random().toString(36).substring(7)}.png`, { type: 'image/png' });
-        
-        return {
-          id: Math.random().toString(36).substring(2, 11),
-          file,
-          previewUrl: url,
-          status: 'idle',
-          progress: 0,
-        };
+        const file = new File([blob], `ai_${Date.now()}.png`, { type: 'image/png' });
+        return { id: Math.random().toString(36).substring(2, 11), file, previewUrl: url, status: 'idle', progress: 0 };
       }));
       setFiles(prev => [...prev, ...newFiles]);
       setGenerationPrompt('');
-    } catch (e) {
-      console.error("AI Image Generation Error:", e);
-      alert("이미지 생성에 실패했습니다.");
-    } finally {
-      setIsGenerating(false);
-    }
+    } catch (e) { alert("이미지 생성 실패"); }
+    finally { setIsGenerating(false); }
   };
 
   const processAll = async () => {
     if (files.length === 0) return;
     const targets = files.filter(f => selectedIds.size === 0 || selectedIds.has(f.id));
     
+    // 크레딧 및 기능 제한 체크
     if (user.credits !== 'unlimited' && (user.credits as number) < targets.length) {
-      alert("크레딧이 부족합니다. 업그레이드 해주세요.");
+      alert("크레딧이 부족합니다.");
+      setShowUpgradeModal(true);
+      return;
+    }
+    if (options.format === 'svg' && user.svgLimit !== 'unlimited' && (user.svgUsage + targets.length > (user.svgLimit as number))) {
+      alert("SVG 변환 횟수가 부족합니다.");
+      setShowUpgradeModal(true);
+      return;
+    }
+    if (options.format === 'gif' && user.gifLimit !== 'unlimited' && (user.gifUsage + targets.length > (user.gifLimit as number))) {
+      alert("GIF 생성 횟수가 부족합니다.");
       setShowUpgradeModal(true);
       return;
     }
 
     setIsProcessing(true);
-    setFiles(prev => prev.map(f => targets.find(t => t.id === f.id) ? { ...f, status: 'processing' } : f));
-
     try {
       const analysisData = await analyzeImages(await Promise.all(targets.map(async f => ({
         id: f.id, base64: await new Promise<string>(res => {
-          const reader = new FileReader();
-          reader.onload = () => res(reader.result as string);
-          reader.readAsDataURL(f.file);
+          const reader = new FileReader(); reader.onload = () => res(reader.result as string); reader.readAsDataURL(f.file);
         })
       }))));
       setCommonKeywords(analysisData.commonKeywords);
-
+      
       for (const target of targets) {
-        const reader = new FileReader();
         const base64 = await new Promise<string>(res => {
-          reader.onload = () => res(reader.result as string);
-          reader.readAsDataURL(target.file);
+          const reader = new FileReader(); reader.onload = () => res(reader.result as string); reader.readAsDataURL(target.file);
         });
         const result = await processImage(base64, options);
         const fileAnalysis = analysisData.files.find(af => af.id === target.id);
-        
-        setFiles(prev => prev.map(f => f.id === target.id ? {
-          ...f, status: 'completed', result: {
-            ...result, title: fileAnalysis?.title || '가공 이미지', keywords: fileAnalysis?.keywords || [], format: options.format, size: ""
-          }
+        setFiles(prev => prev.map(f => f.id === target.id ? { 
+          ...f, status: 'completed', 
+          result: { ...result, title: fileAnalysis?.title || '가공 이미지', keywords: fileAnalysis?.keywords || [], format: options.format, size: "" } 
         } : f));
       }
 
-      if (user.credits !== 'unlimited') {
-        setUser(prev => ({ ...prev, credits: (prev.credits as number) - targets.length }));
+      // 유저 상태 업데이트 (크레딧, SVG/GIF 사용량)
+      const updates: any = {};
+      if (user.credits !== 'unlimited') updates.credits = (user.credits as number) - targets.length;
+      if (options.format === 'svg' && user.svgLimit !== 'unlimited') updates.svgUsage = user.svgUsage + targets.length;
+      if (options.format === 'gif' && user.gifLimit !== 'unlimited') updates.gifUsage = user.gifUsage + targets.length;
+      
+      if (Object.keys(updates).length > 0) {
+        await updateDoc(doc(db, "users", user.uid), updates);
+        setUser(prev => ({ ...prev, ...updates }));
       }
-    } catch (e) { alert("처리 오류 발생"); }
+
+    } catch (e) { alert("처리 오류"); }
     finally { setIsProcessing(false); }
   };
 
   const downloadAll = () => {
     const completed = files.filter(f => f.status === 'completed' && f.result);
-    if (completed.length === 0) return;
-    
-    completed.forEach((f, index) => {
-      setTimeout(() => {
-        downloadResult(f);
-      }, index * 200); // 브라우저 다운로드 지연 방지
-    });
-  };
-
-  const getPrice = (monthly: number) => {
-    if (billingCycle === 'monthly') return monthly.toLocaleString();
-    return (monthly * 0.9).toLocaleString();
-  };
-
-  const handleUpdateSvgColor = (fileId: string, oldColor: string, newColor: string) => {
-    setFiles(prev => prev.map(f => {
-      if (f.id === fileId && f.result?.svgContent) {
-        const updatedSvg = f.result.svgContent.replaceAll(`fill="${oldColor}"`, `fill="${newColor.toUpperCase()}"`);
-        const updatedColors = f.result.svgColorsList?.map(c => c === oldColor ? newColor.toUpperCase() : c);
-        return { ...f, result: { ...f.result, svgContent: updatedSvg, svgColorsList: updatedColors } };
-      }
-      return f;
-    }));
+    completed.forEach((f, i) => setTimeout(() => downloadResult(f), i * 200));
   };
 
   const downloadResult = (f: ImageData) => {
@@ -328,6 +288,11 @@ const App: React.FC = () => {
       link.download = `${f.result.title}.${f.result.format || 'png'}`;
     }
     link.click();
+  };
+
+  const getPrice = (monthly: number) => {
+    if (billingCycle === 'monthly') return monthly.toLocaleString();
+    return (Math.floor(monthly * 0.9)).toLocaleString();
   };
 
   return (
@@ -351,140 +316,6 @@ const App: React.FC = () => {
           )}
         </div>
       </header>
-
-      {/* Upgrade Modal */}
-      {showUpgradeModal && (
-        <div className="fixed inset-0 z-[140] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-[2.5rem] shadow-2xl relative p-8 md:p-12">
-            <button onClick={() => setShowUpgradeModal(false)} className="absolute top-8 right-8 text-text-sub hover:text-text-main transition-colors">
-              <span className="material-symbols-outlined text-3xl">close</span>
-            </button>
-            <div className="text-center space-y-2 mb-10">
-              <h2 className="text-4xl font-black tracking-tight">구독 플랜 선택</h2>
-              <p className="text-text-sub font-bold">등급이 올라갈수록 기능이 확장됩니다.</p>
-            </div>
-            <div className="flex justify-center mb-12">
-              <div className="bg-background-dark p-1 rounded-2xl flex border border-border-color">
-                <button onClick={() => setBillingCycle('monthly')} className={`px-8 py-2.5 rounded-xl text-sm font-black transition-all ${billingCycle === 'monthly' ? 'bg-primary shadow-sm' : 'text-text-sub hover:bg-white/50'}`}>월 결제</button>
-                <button onClick={() => setBillingCycle('yearly')} className={`px-8 py-2.5 rounded-xl text-sm font-black transition-all ${billingCycle === 'yearly' ? 'bg-primary shadow-sm' : 'text-text-sub hover:bg-white/50'}`}>연 결제 (10% 할인)</button>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-              {/* Free */}
-              <div className="bg-white border border-border-color rounded-3xl p-8 flex flex-col items-center text-center space-y-6 hover:shadow-soft transition-all">
-                <span className="material-symbols-outlined text-4xl text-text-main">pets</span>
-                <div><h3 className="text-xl font-black">Free</h3><p className="text-2xl font-black mt-1">무료</p></div>
-                <ul className="text-xs font-bold text-text-sub space-y-3 flex-1 text-left w-full">
-                  <li>• 배경제거 / 크롭 / 노이즈 제거 / 리사이즈</li>
-                  <li>• SVG, GIF, 키워드 분석 월 5회 체험</li>
-                  <li>• 월 30크레딧 (1장 = 1크레딧)</li>
-                </ul>
-                <button className="w-full py-3 rounded-xl border border-border-color font-black text-sm hover:bg-background-light transition-all">시작하기</button>
-              </div>
-              {/* Basic */}
-              <div className="bg-white border border-border-color rounded-3xl p-8 flex flex-col items-center text-center space-y-6 hover:shadow-soft transition-all">
-                <span className="material-symbols-outlined text-4xl text-text-main">inventory_2</span>
-                <div><h3 className="text-xl font-black">Basic</h3><p className="text-2xl font-black mt-1">₩{getPrice(9900)} <span className="text-sm font-bold text-text-sub">/ 월</span></p></div>
-                <ul className="text-xs font-bold text-text-sub space-y-3 flex-1 text-left w-full">
-                  <li>• Free 기능 +</li><li>• 월 300크레딧</li><li>• 추가 기능 각 10회</li>
-                </ul>
-                <button className="w-full py-3 rounded-xl bg-primary hover:bg-primary-hover font-black text-sm shadow-sm transition-all">업그레이드</button>
-              </div>
-              {/* Standard */}
-              <div className="bg-white border border-border-color rounded-3xl p-8 flex flex-col items-center text-center space-y-6 hover:shadow-soft transition-all">
-                <span className="material-symbols-outlined text-4xl text-text-main">stars</span>
-                <div><h3 className="text-xl font-black">Standard</h3><p className="text-2xl font-black mt-1">₩{getPrice(19900)} <span className="text-sm font-bold text-text-sub">/ 월</span></p></div>
-                <ul className="text-xs font-bold text-text-sub space-y-3 flex-1 text-left w-full">
-                  <li>• Basic 기능 +</li><li>• 크레딧 무제한</li><li>• 추가 기능 각 50회</li>
-                </ul>
-                <button className="w-full py-3 rounded-xl bg-primary hover:bg-primary-hover font-black text-sm shadow-sm transition-all">업그레이드</button>
-              </div>
-              {/* Premium */}
-              <div className="bg-surface-highlight border-2 border-primary rounded-3xl p-8 flex flex-col items-center text-center space-y-6 relative hover:shadow-soft transition-all">
-                <div className="absolute top-4 right-4 bg-red-500 text-white text-[10px] px-2 py-0.5 rounded font-black uppercase">인기</div>
-                <span className="material-symbols-outlined text-4xl text-orange-500">military_tech</span>
-                <div><h3 className="text-xl font-black">Premium</h3><p className="text-2xl font-black mt-1">₩{getPrice(39900)} <span className="text-sm font-bold text-text-sub">/ 월</span></p></div>
-                <ul className="text-xs font-bold text-text-sub space-y-3 flex-1 text-left w-full">
-                  <li>• Standard 기능 +</li><li>• 모든 기능 무제한</li>
-                </ul>
-                <button className="w-full py-3 rounded-xl bg-text-main text-white hover:bg-black font-black text-sm shadow-sm transition-all">업그레이드</button>
-              </div>
-            </div>
-            {/* Michina */}
-            <div className="max-w-xs">
-              <div className="bg-surface-highlight border border-primary/50 rounded-3xl p-8 flex flex-col items-center text-center space-y-5 relative hover:shadow-soft transition-all">
-                <div className="absolute top-4 right-4 bg-purple-600 text-white text-[10px] px-2 py-0.5 rounded font-black">특수</div>
-                <span className="material-symbols-outlined text-4xl text-primary">emoji_events</span>
-                <div><h3 className="text-xl font-black">Michina</h3><p className="text-lg font-black mt-1">챌린지 전용</p></div>
-                <ul className="text-xs font-bold text-text-sub space-y-2.5 flex-1 text-left w-full">
-                  <li>• Premium 기능 +</li><li>• 챌린지 기간 자동 활성화</li><li>• 미치나 로그인 사용자 전체 적용</li><li>• 종료 시 Free 등급으로 자동 복귀</li>
-                </ul>
-                <button className="w-full py-3 rounded-xl bg-white border border-border-color font-black text-xs text-text-sub cursor-not-allowed">챌린지 회원 전용</button>
-              </div>
-            </div>
-            <p className="text-center text-[10px] font-bold text-text-sub mt-12 uppercase tracking-widest">다운로드 1장 = 1크레딧 차감</p>
-          </div>
-        </div>
-      )}
-
-      {/* Login Modal */}
-      {showLoginModal && (
-        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-          <div className="bg-surface w-full max-w-md rounded-[2.5rem] shadow-2xl p-10 space-y-6 relative">
-            <button onClick={() => setShowLoginModal(false)} className="absolute top-8 right-8 text-text-sub hover:text-text-main">
-              <span className="material-symbols-outlined text-2xl">close</span>
-            </button>
-            <h3 className="text-3xl font-black">로그인</h3>
-            <div className="flex gap-2 bg-background-light p-1 rounded-2xl border border-border-color">
-              {(['admin', 'special', 'normal'] as UserRole[]).map(r => (
-                <button key={r} onClick={() => setLoginForm(prev => ({...prev, role: r}))} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${loginForm.role === r ? 'bg-primary shadow-sm' : 'text-text-sub hover:bg-white/50'}`}>
-                  {r === 'admin' ? '관리자' : r === 'special' ? '미치나' : '일반'}
-                </button>
-              ))}
-            </div>
-            <div className="space-y-4">
-              <input type="email" placeholder="이메일" value={loginForm.email} onChange={e => setLoginForm(p => ({...p, email: e.target.value}))} className="w-full p-5 rounded-2xl border border-border-color bg-background-light font-bold outline-none focus:border-primary" />
-              <input type="password" placeholder="비밀번호" value={loginForm.password} onChange={e => setLoginForm(p => ({...p, password: e.target.value}))} className="w-full p-5 rounded-2xl border border-border-color bg-background-light font-bold outline-none focus:border-primary" />
-            </div>
-            <div className="space-y-3">
-              <button onClick={handleLogin} className="w-full py-5 rounded-2xl bg-primary hover:bg-primary-hover font-black text-lg border-b-4 border-primary-hover active:border-b-0 active:translate-y-1 transition-all">로그인하기</button>
-              <button onClick={handleGoogleLogin} className="w-full py-4 rounded-2xl bg-white border border-border-color hover:bg-background-light flex items-center justify-center gap-3 font-black text-sm">
-                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/action/google.svg" className="w-5 h-5" alt="" />
-                Google로 로그인
-              </button>
-            </div>
-            <div className="text-center">
-              <button onClick={() => {setShowLoginModal(false); setShowSignupModal(true);}} className="text-sm font-black text-text-sub underline hover:text-primary">아직 회원이 아니신가요? 회원가입</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Signup Modal */}
-      {showSignupModal && (
-        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-          <div className="bg-surface w-full max-w-md rounded-[2.5rem] shadow-2xl p-10 space-y-6 relative">
-            <button onClick={() => {setShowSignupModal(false); setShowLoginModal(true);}} className="absolute top-8 left-8 text-text-sub hover:text-text-main flex items-center gap-1">
-              <span className="material-symbols-outlined text-xl">arrow_back</span>
-              <span className="text-xs font-black">로그인으로</span>
-            </button>
-            <h3 className="text-3xl font-black mt-4">회원가입</h3>
-            <div className="flex gap-2 bg-background-light p-1 rounded-2xl border border-border-color">
-              {(['special', 'normal'] as UserRole[]).map(r => (
-                <button key={r} onClick={() => setSignupForm(prev => ({...prev, role: r}))} className={`flex-1 py-3 rounded-xl text-xs font-black transition-all ${signupForm.role === r ? 'bg-primary shadow-sm' : 'text-text-sub hover:bg-white/50'}`}>
-                  {r === 'special' ? '미치나' : '일반'}
-                </button>
-              ))}
-            </div>
-            <div className="space-y-4">
-              <input type="text" placeholder="이름" value={signupForm.name} onChange={e => setSignupForm(p => ({...p, name: e.target.value}))} className="w-full p-5 rounded-2xl border border-border-color bg-background-light font-bold outline-none focus:border-primary" />
-              <input type="email" placeholder="이메일" value={signupForm.email} onChange={e => setSignupForm(p => ({...p, email: e.target.value}))} className="w-full p-5 rounded-2xl border border-border-color bg-background-light font-bold outline-none focus:border-primary" />
-              <input type="password" placeholder="비밀번호" value={signupForm.password} onChange={e => setSignupForm(p => ({...p, password: e.target.value}))} className="w-full p-5 rounded-2xl border border-border-color bg-background-light font-bold outline-none focus:border-primary" />
-            </div>
-            <button onClick={handleSignup} className="w-full py-5 rounded-2xl bg-text-main text-white font-black text-lg hover:bg-black transition-all">가입 완료</button>
-          </div>
-        </div>
-      )}
 
       <main className="flex-1 w-full max-w-4xl mx-auto p-4 md:p-8 flex flex-col gap-10">
         <section className="bg-surface rounded-3xl p-8 border border-border-color shadow-soft space-y-4">
@@ -533,16 +364,6 @@ const App: React.FC = () => {
               <span className={`material-symbols-outlined ${options.autoCrop ? 'text-primary' : 'text-text-sub'}`}>{options.autoCrop ? 'check_circle' : 'radio_button_unchecked'}</span>
             </button>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 border-t border-border-color pt-8">
-            <div className="space-y-4">
-              <label className="text-xs font-black text-text-sub uppercase">리사이즈 (가로 너비 PX)</label>
-              <input type="number" value={options.resizeWidth} onChange={(e) => setOptions(o => ({...o, resizeWidth: parseInt(e.target.value)}))} className="w-full bg-background-light border border-border-color font-black rounded-xl p-4 outline-none shadow-inner" />
-            </div>
-            <div className="space-y-4">
-              <div className="flex justify-between font-black"><label className="text-xs text-text-sub uppercase">노이즈/블러 제거</label><span>{options.noiseLevel}%</span></div>
-              <input type="range" min="0" max="100" value={options.noiseLevel} onChange={(e) => setOptions(o => ({...o, noiseLevel: parseInt(e.target.value)}))} className="w-full accent-primary h-2 rounded-full cursor-pointer" />
-            </div>
-          </div>
           <div className="space-y-4 border-t border-border-color pt-8">
             <label className="text-xs font-black text-text-sub uppercase">변환 포맷 및 상세 설정</label>
             <div className="flex gap-2">
@@ -552,7 +373,7 @@ const App: React.FC = () => {
             </div>
             {options.format === 'svg' && (
               <div className="bg-background-light p-4 rounded-2xl space-y-3 border border-border-color shadow-inner">
-                <p className="text-xs font-black">최대 추출 색상 (2-6색) - <span className="text-primary-hover">원본 색상 보존 및 빈틈 방지 적용</span></p>
+                <p className="text-xs font-black">추출 색상 - <span className="text-primary-hover">원본 디테일 보존 및 벡터 경로 생성</span></p>
                 <div className="flex gap-2 overflow-x-auto pb-2">
                   {[2, 3, 4, 5, 6, 12].map(c => (
                     <button key={c} onClick={() => setOptions(o => ({...o, svgColors: c}))} className={`flex-none px-6 py-2 rounded-xl text-xs font-bold border ${options.svgColors === c ? 'bg-primary border-primary shadow-sm' : 'bg-white'}`}>{c === 12 ? '원본그대로' : `${c}색`}</button>
@@ -572,86 +393,48 @@ const App: React.FC = () => {
           </button>
         </section>
 
-        {files.some(f => f.status === 'completed') && (
+        {(files.some(f => f.status === 'completed') || commonKeywords.length > 0) && (
           <div className="space-y-6 pb-20">
-            {/* Common Keywords Section */}
             {commonKeywords.length > 0 && (
-              <section className="bg-surface rounded-3xl p-8 border border-border-color shadow-soft space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+              <section className="bg-surface rounded-3xl p-8 border border-border-color shadow-soft space-y-4">
                 <div className="flex justify-between items-center">
-                  <h3 className="text-xl font-black flex items-center gap-2">
-                    <span className="material-symbols-outlined text-primary">sell</span>
-                    공통 SEO 키워드 (미리캔버스 최적화)
-                  </h3>
+                  <h3 className="text-xl font-black flex items-center gap-2"><span className="material-symbols-outlined text-primary">sell</span>SEO 키워드</h3>
                   <div className="flex gap-2">
-                    <button 
-                      onClick={downloadAll}
-                      className="text-xs font-black bg-primary px-4 py-2 rounded-xl border border-primary-hover hover:bg-primary-hover transition-all active:scale-95"
-                    >
-                      전체 다운로드
-                    </button>
-                    <button 
-                      onClick={() => copyToClipboard(commonKeywords.join(', '))}
-                      className="text-xs font-black bg-background-light px-4 py-2 rounded-xl border border-border-color hover:border-primary transition-all active:scale-95"
-                    >
-                      전체 키워드 복사
-                    </button>
+                    <button onClick={downloadAll} className="text-xs font-black bg-primary px-4 py-2 rounded-xl border border-primary-hover">전체 다운로드</button>
+                    <button onClick={() => copyToClipboard(commonKeywords.join(', '))} className="text-xs font-black bg-background-light px-4 py-2 rounded-xl border border-border-color">키워드 복사</button>
                   </div>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  {commonKeywords.map((k, i) => (
-                    <span key={i} className="text-xs font-bold px-3 py-1.5 bg-background-light rounded-full border border-border-color text-text-main shadow-inner">
-                      #{k}
-                    </span>
-                  ))}
-                </div>
+                <div className="flex flex-wrap gap-2">{commonKeywords.map((k, i) => <span key={i} className="text-xs font-bold px-3 py-1.5 bg-background-light rounded-full border border-border-color">#{k}</span>)}</div>
               </section>
             )}
 
-            {/* Individual File Results */}
+            {/* 개별 이미지 처리 결과 */}
             <section className="grid grid-cols-1 gap-6">
               {files.filter(f => f.status === 'completed' && f.result).map(f => (
                 <div key={f.id} className="bg-surface rounded-3xl p-8 border border-border-color shadow-soft flex flex-col md:flex-row gap-8 animate-in fade-in zoom-in-95 duration-300">
-                  {/* Image Preview Left */}
                   <div className="w-full md:w-48 aspect-square bg-white rounded-2xl overflow-hidden border border-border-color flex items-center justify-center p-4 relative group shadow-inner shrink-0">
                     <img src={f.result?.processedUrl} className="max-h-full max-w-full object-contain" />
                     <button onClick={() => downloadResult(f)} className="absolute inset-0 bg-black/40 text-white opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all">
                       <span className="material-symbols-outlined text-3xl">download</span>
                     </button>
                   </div>
-
-                  {/* Info Right */}
                   <div className="flex-1 space-y-6">
                     <div className="space-y-2">
                       <div className="flex justify-between items-center">
-                        <label className="text-[10px] font-black text-text-sub uppercase tracking-wider">가공된 제목 (미리캔버스 최적화)</label>
-                        <button onClick={() => copyToClipboard(f.result?.title || '')} className="text-[10px] font-black text-primary-hover hover:underline transition-all active:scale-95">제목 복사</button>
+                        <label className="text-[10px] font-black text-text-sub uppercase tracking-wider">가공된 제목</label>
+                        <button onClick={() => copyToClipboard(f.result?.title || '')} className="text-[10px] font-black text-primary-hover hover:underline">제목 복사</button>
                       </div>
                       <h4 className="text-lg font-black leading-tight">{f.result?.title}</h4>
                     </div>
-
                     <div className="space-y-3">
                       <div className="flex justify-between items-center">
                         <label className="text-[10px] font-black text-text-sub uppercase tracking-wider">이미지 키워드</label>
-                        <button onClick={() => copyToClipboard(f.result?.keywords.join(', ') || '')} className="text-[10px] font-black text-primary-hover hover:underline transition-all active:scale-95">키워드 복사</button>
+                        <button onClick={() => copyToClipboard(f.result?.keywords.join(', ') || '')} className="text-[10px] font-black text-primary-hover hover:underline">키워드 복사</button>
                       </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {f.result?.keywords.map((k, i) => (
-                          <span key={i} className="text-[11px] font-bold px-2.5 py-1 bg-background-light rounded-lg border border-border-color text-text-main">
-                            {k}
-                          </span>
-                        ))}
-                      </div>
+                      <div className="flex flex-wrap gap-1.5">{f.result?.keywords.map((k, i) => <span key={i} className="text-[11px] font-bold px-2.5 py-1 bg-background-light rounded-lg border border-border-color">{k}</span>)}</div>
                     </div>
-
                     <div className="flex items-center gap-3 pt-2">
                       <span className="text-[10px] font-black bg-primary px-3 py-1 rounded-md uppercase tracking-wider">{f.result?.format}</span>
-                      {f.result?.svgColorsList && (
-                        <div className="flex gap-1.5">
-                          {f.result.svgColorsList.map((c, i) => (
-                            <input key={i} type="color" value={c} onChange={(e) => handleUpdateSvgColor(f.id, c, e.target.value)} className="size-6 rounded-full border border-border-color cursor-pointer appearance-none overflow-hidden transition-transform hover:scale-110" />
-                          ))}
-                        </div>
-                      )}
                     </div>
                   </div>
                 </div>
@@ -661,13 +444,123 @@ const App: React.FC = () => {
         )}
       </main>
 
-      <footer className="border-t border-border-color py-10 flex flex-col items-center gap-4">
+      <footer className="border-t border-border-color py-10 flex flex-col items-center gap-4 bg-white/50">
         <div className="flex gap-6">
           <button onClick={() => setShowTermsModal(true)} className="text-xs font-black text-text-sub hover:text-text-main transition-colors">이용약관</button>
           <button onClick={() => setShowPrivacyModal(true)} className="text-xs font-black text-text-sub hover:text-text-main transition-colors">개인정보처리방침</button>
         </div>
         <p className="text-[10px] font-bold text-text-sub opacity-50">© 2025 ImageGenius. All rights reserved.</p>
       </footer>
+
+      {/* Upgrade Modal */}
+      {showUpgradeModal && (
+        <div className="fixed inset-0 z-[140] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-[2.5rem] shadow-2xl relative p-8 md:p-12">
+            <button onClick={() => setShowUpgradeModal(false)} className="absolute top-8 right-8 text-text-sub hover:text-text-main transition-colors">
+              <span className="material-symbols-outlined text-3xl">close</span>
+            </button>
+            <div className="text-center space-y-2 mb-10">
+              <h2 className="text-4xl font-black tracking-tight">구독 플랜 선택</h2>
+              <p className="text-text-sub font-bold">등급이 올라갈수록 기능이 확장됩니다.</p>
+            </div>
+            <div className="flex justify-center mb-12">
+              <div className="bg-background-dark p-1 rounded-2xl flex border border-border-color">
+                <button onClick={() => setBillingCycle('monthly')} className={`px-8 py-2.5 rounded-xl text-sm font-black transition-all ${billingCycle === 'monthly' ? 'bg-primary shadow-sm' : 'text-text-sub hover:bg-white/50'}`}>월 결제</button>
+                <button onClick={() => setBillingCycle('yearly')} className={`px-8 py-2.5 rounded-xl text-sm font-black transition-all ${billingCycle === 'yearly' ? 'bg-primary shadow-sm' : 'text-text-sub hover:bg-white/50'}`}>연 결제 (10% 할인)</button>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+              <div className="bg-white border border-border-color rounded-3xl p-8 flex flex-col items-center text-center space-y-6 hover:shadow-soft transition-all">
+                <span className="material-symbols-outlined text-4xl text-text-main">pets</span>
+                <div><h3 className="text-xl font-black">Free</h3><p className="text-2xl font-black mt-1">무료</p></div>
+                <ul className="text-xs font-bold text-text-sub space-y-3 flex-1 text-left w-full">
+                  <li>• 배경제거 / 크롭 / 노이즈 제거 / 리사이즈</li>
+                  <li>• SVG, GIF, 키워드 분석 월 5회 체험</li>
+                  <li>• 월 30크레딧 (1장 = 1크레딧)</li>
+                </ul>
+                <button className="w-full py-3 rounded-xl border border-border-color font-black text-sm hover:bg-background-light transition-all">시작하기</button>
+              </div>
+              <div className="bg-white border border-border-color rounded-3xl p-8 flex flex-col items-center text-center space-y-6 hover:shadow-soft transition-all">
+                <span className="material-symbols-outlined text-4xl text-text-main">inventory_2</span>
+                <div><h3 className="text-xl font-black">Basic</h3><p className="text-2xl font-black mt-1">₩{getPrice(9900)} <span className="text-sm font-bold text-text-sub">/ 월</span></p></div>
+                <ul className="text-xs font-bold text-text-sub space-y-3 flex-1 text-left w-full">
+                  <li>• Free 기능 +</li><li>• 월 300크레딧</li><li>• 추가 기능 각 10회</li>
+                </ul>
+                <button className="w-full py-3 rounded-xl bg-primary hover:bg-primary-hover font-black text-sm shadow-sm transition-all">업그레이드</button>
+              </div>
+              <div className="bg-white border border-border-color rounded-3xl p-8 flex flex-col items-center text-center space-y-6 hover:shadow-soft transition-all">
+                <span className="material-symbols-outlined text-4xl text-text-main">stars</span>
+                <div><h3 className="text-xl font-black">Standard</h3><p className="text-2xl font-black mt-1">₩{getPrice(19900)} <span className="text-sm font-bold text-text-sub">/ 월</span></p></div>
+                <ul className="text-xs font-bold text-text-sub space-y-3 flex-1 text-left w-full">
+                  <li>• Basic 기능 +</li><li>• 크레딧 무제한</li><li>• 추가 기능 각 50회</li>
+                </ul>
+                <button className="w-full py-3 rounded-xl bg-primary hover:bg-primary-hover font-black text-sm shadow-sm transition-all">업그레이드</button>
+              </div>
+              <div className="bg-surface-highlight border-2 border-primary rounded-3xl p-8 flex flex-col items-center text-center space-y-6 relative hover:shadow-soft transition-all">
+                <div className="absolute top-4 right-4 bg-red-500 text-white text-[10px] px-2 py-0.5 rounded font-black uppercase">인기</div>
+                <span className="material-symbols-outlined text-4xl text-orange-500">military_tech</span>
+                <div><h3 className="text-xl font-black">Premium</h3><p className="text-2xl font-black mt-1">₩{getPrice(39900)} <span className="text-sm font-bold text-text-sub">/ 월</span></p></div>
+                <ul className="text-xs font-bold text-text-sub space-y-3 flex-1 text-left w-full">
+                  <li>• Standard 기능 +</li><li>• 모든 기능 무제한</li>
+                </ul>
+                <button className="w-full py-3 rounded-xl bg-text-main text-white hover:bg-black font-black text-sm shadow-sm transition-all">업그레이드</button>
+              </div>
+            </div>
+            <div className="max-w-xs">
+              <div className="bg-surface-highlight border border-primary/50 rounded-3xl p-8 flex flex-col items-center text-center space-y-5 relative hover:shadow-soft transition-all">
+                <div className="absolute top-4 right-4 bg-purple-600 text-white text-[10px] px-2 py-0.5 rounded font-black">특수</div>
+                <span className="material-symbols-outlined text-4xl text-primary">emoji_events</span>
+                <div><h3 className="text-xl font-black">Michina</h3><p className="text-lg font-black mt-1">챌린지 전용</p></div>
+                <ul className="text-xs font-bold text-text-sub space-y-2.5 flex-1 text-left w-full">
+                  <li>• Premium 기능 +</li><li>• 챌린지 기간 자동 활성화</li><li>• 미치나 로그인 사용자 전체 적용</li><li>• 종료 시 Free 등급으로 자동 복귀</li>
+                </ul>
+                <button className="w-full py-3 rounded-xl bg-white border border-border-color font-black text-xs text-text-sub cursor-not-allowed">챌린지 회원 전용</button>
+              </div>
+            </div>
+            <p className="text-center text-[10px] font-bold text-text-sub mt-12 uppercase tracking-widest">다운로드 1장 = 1크레딧 차감</p>
+          </div>
+        </div>
+      )}
+
+      {showLoginModal && (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div className="bg-surface w-full max-w-md rounded-[2.5rem] shadow-2xl p-10 space-y-6 relative">
+            <button onClick={() => setShowLoginModal(false)} className="absolute top-8 right-8 text-text-sub hover:text-text-main"><span className="material-symbols-outlined text-2xl">close</span></button>
+            <h3 className="text-3xl font-black">로그인</h3>
+            <div className="space-y-4">
+              <input type="email" placeholder="이메일" value={loginForm.email} onChange={e => setLoginForm(p => ({...p, email: e.target.value}))} className="w-full p-5 rounded-2xl border border-border-color bg-background-light font-bold" />
+              <input type="password" placeholder="비밀번호" value={loginForm.password} onChange={e => setLoginForm(p => ({...p, password: e.target.value}))} className="w-full p-5 rounded-2xl border border-border-color bg-background-light font-bold" />
+            </div>
+            <div className="space-y-3">
+              <button onClick={handleLogin} className="w-full py-5 rounded-2xl bg-primary hover:bg-primary-hover font-black text-lg border-b-4 border-primary-hover">로그인하기</button>
+              <button onClick={handleGoogleLogin} className="w-full py-4 rounded-2xl bg-white border border-border-color flex items-center justify-center gap-3 font-black text-sm">
+                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/action/google.svg" className="w-5 h-5" alt="" /> Google로 로그인
+              </button>
+            </div>
+            <div className="text-center">
+              <button onClick={() => {setShowLoginModal(false); setShowSignupModal(true);}} className="text-sm font-black text-text-sub underline hover:text-primary">아직 회원이 아니신가요? 회원가입</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSignupModal && (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div className="bg-surface w-full max-w-md rounded-[2.5rem] shadow-2xl p-10 space-y-6 relative">
+            <button onClick={() => {setShowSignupModal(false); setShowLoginModal(true);}} className="absolute top-8 left-8 text-text-sub hover:text-text-main flex items-center gap-1">
+              <span className="material-symbols-outlined text-xl">arrow_back</span>
+              <span className="text-xs font-black">로그인으로</span>
+            </button>
+            <h3 className="text-3xl font-black mt-4">회원가입</h3>
+            <div className="space-y-4">
+              <input type="text" placeholder="이름" value={signupForm.name} onChange={e => setSignupForm(p => ({...p, name: e.target.value}))} className="w-full p-5 rounded-2xl border border-border-color bg-background-light font-bold" />
+              <input type="email" placeholder="이메일" value={signupForm.email} onChange={e => setSignupForm(p => ({...p, email: e.target.value}))} className="w-full p-5 rounded-2xl border border-border-color bg-background-light font-bold" />
+              <input type="password" placeholder="비밀번호" value={signupForm.password} onChange={e => setSignupForm(p => ({...p, password: e.target.value}))} className="w-full p-5 rounded-2xl border border-border-color bg-background-light font-bold" />
+            </div>
+            <button onClick={handleSignup} className="w-full py-5 rounded-2xl bg-text-main text-white font-black text-lg hover:bg-black transition-all">가입 완료</button>
+          </div>
+        </div>
+      )}
 
       {showTermsModal && (
         <div className="fixed inset-0 z-[160] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">

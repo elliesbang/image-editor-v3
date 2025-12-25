@@ -1,7 +1,7 @@
 
 /**
  * Advanced Image Processing Library
- * Specialized for High-Fidelity SVG Tracing with Subject Protection.
+ * Optimized for High-Fidelity Vector SVG Tracing with Strict 150KB Limit.
  */
 
 export async function processImage(
@@ -33,7 +33,7 @@ export async function processImage(
   let width = canvas.width;
   let height = canvas.height;
 
-  // 1. Background Removal (Upgraded with Connected-Component / Flood Fill to Protect White Subjects)
+  // 1. Background Removal
   if (options.bgRemove) {
     const imageData = ctx.getImageData(0, 0, width, height);
     const data = imageData.data;
@@ -45,8 +45,6 @@ export async function processImage(
       return Math.sqrt(Math.pow(r1 - r2, 2) + Math.pow(g1 - g2, 2) + Math.pow(b1 - b2, 2));
     };
 
-    // 테두리 픽셀을 순회하며 배경색 추출 및 초기 큐 설정 (상하좌우 끝 2px 영역)
-    const inset = 2;
     const samplePoints: {x: number, y: number}[] = [];
     for (let x = 0; x < width; x++) {
       samplePoints.push({x, y: 0}, {x, y: height - 1});
@@ -55,14 +53,11 @@ export async function processImage(
       samplePoints.push({x: 0, y}, {x: width - 1, y});
     }
 
-    // 초기 배경 시드 색상들
     const bgSeeds = samplePoints.map(p => {
       const idx = getIdx(p.x, p.y);
       return { r: data[idx], g: data[idx+1], b: data[idx+2] };
     });
 
-    // 테두리에서 시작하여 연결된 배경 영역을 탐색 (Flood Fill)
-    // 이 방식은 피사체 내부에 갇힌 하얀색(배경과 같은 색)이 뚫리는 것을 방지합니다.
     samplePoints.forEach(p => {
       const vIdx = p.y * width + p.x;
       if (!visited[vIdx]) {
@@ -72,37 +67,26 @@ export async function processImage(
     });
 
     let head = 0;
-    const threshold = 35; // 배경색 유사도 임계값
+    const threshold = 35;
 
     while (head < queue.length) {
       const cx = queue[head++];
       const cy = queue[head++];
-      const cIdx = getIdx(cx, cy);
-      const cr = data[cIdx], cg = data[cIdx+1], cb = data[cIdx+2];
-
-      const neighbors = [
-        {x: cx + 1, y: cy}, {x: cx - 1, y: cy},
-        {x: cx, y: cy + 1}, {x: cx, y: cy - 1}
-      ];
+      const neighbors = [{x: cx + 1, y: cy}, {x: cx - 1, y: cy}, {x: cx, y: cy + 1}, {x: cx, y: cy - 1}];
 
       for (const n of neighbors) {
         if (n.x >= 0 && n.x < width && n.y >= 0 && n.y < height) {
           const nVIdx = n.y * width + n.x;
           if (!visited[nVIdx]) {
             const nIdx = getIdx(n.x, n.y);
-            const nr = data[nIdx], ng = data[nIdx+1], nb = data[nIdx+2], na = data[nIdx+3];
-            
-            // 색상 유사도 체크 (이미 불투명한 픽셀만 탐색)
-            if (na > 10) {
-              // 현재 픽셀이 초기 배경 시드 색상 중 하나와 유사한지 확인
+            if (data[nIdx+3] > 10) {
               let isBg = false;
               for (const seed of bgSeeds) {
-                if (getDistance(nr, ng, nb, seed.r, seed.g, seed.b) < threshold) {
+                if (getDistance(data[nIdx], data[nIdx+1], data[nIdx+2], seed.r, seed.g, seed.b) < threshold) {
                   isBg = true;
                   break;
                 }
               }
-
               if (isBg) {
                 visited[nVIdx] = 1;
                 queue.push(n.x, n.y);
@@ -113,22 +97,19 @@ export async function processImage(
       }
     }
 
-    // 탐색된 배경 영역만 투명화
     for (let i = 0; i < width * height; i++) {
-      if (visited[i]) {
-        data[i * 4 + 3] = 0;
-      }
+      if (visited[i]) data[i * 4 + 3] = 0;
     }
     ctx.putImageData(imageData, 0, 0);
   }
 
-  // 2. Auto Crop (Subject Tight Logic)
+  // 2. Auto Crop
   if (options.autoCrop) {
     const scanData = ctx.getImageData(0, 0, width, height).data;
     let minX = width, minY = height, maxX = 0, maxY = 0, found = false;
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
-        if (scanData[(y * width + x) * 4 + 3] > 10) { // 어느정도 불투명한 픽셀만 체크
+        if (scanData[(y * width + x) * 4 + 3] > 10) {
           if (x < minX) minX = x; if (x > maxX) maxX = x;
           if (y < minY) minY = y; if (y > maxY) maxY = y;
           found = true;
@@ -163,7 +144,6 @@ export async function processImage(
     width = canvas.width; height = canvas.height;
   }
 
-  // 4. SVG Tracing (150KB Limit + Transparent + No Stroke)
   let svgContent: string | undefined;
   let svgColorsList: string[] | undefined;
   if (options.format === 'svg') {
@@ -172,34 +152,28 @@ export async function processImage(
     svgColorsList = trace.colors;
   }
 
-  const finalUrl = canvas.toDataURL(`image/png`);
-
   return {
-    processedUrl: finalUrl,
-    width,
-    height,
-    svgContent,
-    svgColorsList
+    processedUrl: canvas.toDataURL(`image/png`),
+    width, height, svgContent, svgColorsList
   };
 }
 
 async function traceToSVG(canvas: HTMLCanvasElement, colorsCount: number): Promise<{ content: string; colors: string[] }> {
-  const MAX_BYTES = 150 * 1024;
+  // 사용자의 요청대로 150KB 이하로 엄격히 제한
+  const MAX_BYTES = 150 * 1024; 
   let scale = 1.0;
+  // 원본그대로(12) 선택 시 최대 256색, 그 외에는 선택된 수만큼 제한
+  const effectiveLimit = colorsCount === 12 ? 256 : colorsCount;
   
   const performTrace = (w: number, h: number, data: Uint8ClampedArray, limit: number) => {
     const colorFreq: Record<string, number> = {};
     for (let i = 0; i < data.length; i += 4) {
-      if (data[i+3] < 128) continue;
+      if (data[i+3] < 50) continue; // 투명도 낮은 픽셀 제외
       const hex = `#${((1 << 24) + (data[i] << 16) + (data[i+1] << 8) + data[i+2]).toString(16).slice(1).toUpperCase()}`;
       colorFreq[hex] = (colorFreq[hex] || 0) + 1;
     }
 
-    const palette = Object.entries(colorFreq)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, limit)
-      .map(e => e[0]);
-
+    const palette = Object.entries(colorFreq).sort((a, b) => b[1] - a[1]).slice(0, limit).map(e => e[0]);
     if (palette.length === 0) return { content: '', colors: [] };
 
     const rgbPalette = palette.map(hex => {
@@ -216,44 +190,22 @@ async function traceToSVG(canvas: HTMLCanvasElement, colorsCount: number): Promi
       for (let x = 0; x < w; x++) {
         const idx = (y * w + x) * 4;
         let currentHex = "";
-        if (data[idx+3] > 128) {
+        
+        if (data[idx+3] > 60) {
           let minD = Infinity;
-          rgbPalette.forEach(p => {
+          for(const p of rgbPalette) {
             const d = Math.pow(data[idx]-p.r, 2) + Math.pow(data[idx+1]-p.g, 2) + Math.pow(data[idx+2]-p.b, 2);
             if (d < minD) { minD = d; currentHex = p.hex; }
-          });
+          }
         }
 
         if (currentHex !== lastHex) {
-          if (lastHex !== "") paths[lastHex].push(`M${startX},${y}h${x-startX}v1h-${x-startX}z`);
+          if (lastHex !== "") {
+            // 가로 병합 로직 최적화 (M x y h L v 1 h -L z 형태의 벡터 패스)
+            paths[lastHex].push(`M${startX} ${y}h${x-startX}v1h-${x-startX}z`);
+          }
           startX = x; lastHex = currentHex;
         }
       }
-      if (lastHex !== "") paths[lastHex].push(`M${startX},${y}h${w-startX}v1h-${w-startX}z`);
-    }
-
-    let svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" shape-rendering="crispEdges">`;
-    palette.forEach(c => {
-      if (paths[c].length > 0) {
-        svg += `<path d="${paths[c].join('')}" fill="${c}" stroke="none" />`;
-      }
-    });
-    svg += `</svg>`;
-    return { content: svg, colors: palette };
-  };
-
-  let result = { content: '', colors: [] as string[] };
-  while(scale > 0.1) {
-    const sw = Math.round(canvas.width * scale);
-    const sh = Math.round(canvas.height * scale);
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = sw; tempCanvas.height = sh;
-    const tctx = tempCanvas.getContext('2d')!;
-    tctx.drawImage(canvas, 0, 0, sw, sh);
-    const data = tctx.getImageData(0, 0, sw, sh).data;
-    result = performTrace(sw, sh, data, colorsCount);
-    if (result.content.length < MAX_BYTES) break;
-    scale *= 0.8;
-  }
-  return result;
-}
+      if (lastHex !== "") {
+        paths[lastHex].push(`M${startX} ${y}h${
