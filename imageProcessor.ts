@@ -144,6 +144,22 @@ export async function processImage(
     width = canvas.width; height = canvas.height;
   }
 
+  // 4. Noise Reduction (adjustable blur)
+  if (options.noiseLevel > 0) {
+    const noiseCanvas = document.createElement('canvas');
+    noiseCanvas.width = canvas.width;
+    noiseCanvas.height = canvas.height;
+    const nctx = noiseCanvas.getContext('2d', { willReadFrequently: true });
+    if (!nctx) throw new Error("Canvas context missing");
+
+    nctx.filter = `blur(${options.noiseLevel}px)`;
+    nctx.drawImage(canvas, 0, 0);
+    nctx.filter = 'none';
+
+    canvas = noiseCanvas;
+    ctx = nctx;
+  }
+
   let svgContent: string | undefined;
   let svgColorsList: string[] | undefined;
   let processedUrl = canvas.toDataURL(`image/png`);
