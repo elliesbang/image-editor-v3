@@ -256,8 +256,23 @@ export const App: React.FC = () => {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    setUser(p => ({...p, isLoggedIn: false}));
+    setUser({
+      uid: '',
+      isLoggedIn: false,
+      email: '',
+      name: '',
+      role: 'normal',
+      plan: 'free',
+      credit: 30,
+      svgUsage: 0,
+      svgLimit: 5,
+      gifUsage: 0,
+      gifLimit: 5,
+    });
     localStorage.removeItem('genius_user_cache');
+    localStorage.removeItem('app_role');
+    sessionStorage.clear();
+    window.location.href = '/';
   };
 
   const handleFiles = (incomingFiles: File[]) => {
@@ -270,15 +285,6 @@ export const App: React.FC = () => {
 
   const handleGenerateImage = async () => {
     if (!generationPrompt.trim() || isGenerating) return;
-
-    const geminiApiKey =
-      import.meta.env.VITE_GEMINI_API_KEY ||
-      (typeof process !== "undefined" ? process.env?.GEMINI_API_KEY : undefined);
-
-    if (!geminiApiKey) {
-      alert("Gemini API 키가 설정되어 있지 않습니다. 관리자에게 문의해 주세요.");
-      return;
-    }
 
     setIsGenerating(true);
     try {
