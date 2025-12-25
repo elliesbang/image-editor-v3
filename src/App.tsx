@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { ImageData, ProcessingOptions, GeminiAnalysisResponse } from './types';
-import { analyzeImages, generateAIImages } from './geminiService';
-import { processImage } from './imageProcessor';
-import { supabase } from './src/lib/supabaseClient';
+import { analyzeImages, generateAIImages } from './services/geminiService';
+import { processImage } from './services/imageProcessor';
+import { supabase } from './lib/supabaseClient';
 
 type PlanType = 'free' | 'basic' | 'standard' | 'premium' | 'michina';
 type UserRole = 'special' | 'normal' | 'admin';
@@ -69,7 +69,7 @@ export const App: React.FC = () => {
       uid: supabaseUser.id,
       isLoggedIn: true,
       email: supabaseUser.email || profile?.email || '',
-      name: profile?.full_name || profile?.name || '사용자',
+      name: profile?.name || supabaseUser.email || '사용자',
       role: mappedRole,
       plan: profile?.plan || 'free',
       credits: profile?.credits ?? 30,
@@ -83,7 +83,7 @@ export const App: React.FC = () => {
   const fetchProfile = async (userId: string) => {
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, role, email, full_name, name, plan, credits, svg_usage, svg_limit, gif_usage, gif_limit')
+      .select('id, role, email, name, plan, credits, svg_usage, svg_limit, gif_usage, gif_limit')
       .eq('id', userId)
       .single();
 

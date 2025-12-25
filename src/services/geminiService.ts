@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { GeminiAnalysisResponse } from "./types";
+import { GeminiAnalysisResponse } from "../types";
 
 /**
  * Service to handle image analysis and generation using Google Gemini API.
