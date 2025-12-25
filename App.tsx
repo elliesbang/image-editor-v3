@@ -23,6 +23,19 @@ import {
   updateDoc
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
+// AI Studio API Key Helper
+// We define the AIStudio interface to resolve type clashing and identical modifier issues on Window.
+interface AIStudio {
+  hasSelectedApiKey: () => Promise<boolean>;
+  openSelectKey: () => Promise<void>;
+}
+
+declare global {
+  interface Window {
+    readonly aistudio: AIStudio;
+  }
+}
+
 const firebaseConfig = {
   apiKey: "AIzaSyCUJColyeKcWo0CSN-6_k3urHkL2Haq91Q",
   authDomain: "gen-lang-client-0303289355.firebaseapp.com",
@@ -200,9 +213,27 @@ const App: React.FC = () => {
 
   const handleGenerateImage = async () => {
     if (!generationPrompt.trim() || isGenerating) return;
+
+    // Gemini 3 Pro 모델 사용을 위해 유료 API 키 선택 확인
+    const hasKey = await window.aistudio.hasSelectedApiKey();
+    if (!hasKey) {
+      await window.aistudio.openSelectKey();
+    }
+
     setIsGenerating(true);
     try {
-      const imageUrls = await generateAIImages(generationPrompt);
+      // 선택된 이미지가 있다면 참조 이미지로 사용 (배경 생성/편집 기능)
+      let referenceBase64: string | undefined;
+      const selectedFile = files.find(f => selectedIds.has(f.id));
+      if (selectedFile) {
+        referenceBase64 = await new Promise<string>(res => {
+          const reader = new FileReader();
+          reader.onload = () => res(reader.result as string);
+          reader.readAsDataURL(selectedFile.file);
+        });
+      }
+
+      const imageUrls = await generateAIImages(generationPrompt, 4, referenceBase64);
       const newFiles: ImageData[] = await Promise.all(imageUrls.map(async (url) => {
         const response = await fetch(url);
         const blob = await response.blob();
@@ -211,7 +242,14 @@ const App: React.FC = () => {
       }));
       setFiles(prev => [...prev, ...newFiles]);
       setGenerationPrompt('');
-    } catch (e) { alert("이미지 생성 실패"); }
+    } catch (e: any) {
+      // If the request fails with an error message containing "Requested entity was not found.", 
+      // reset key selection and prompt the user to select a key again via openSelectKey().
+      if (e.message?.includes("Requested entity was not found")) {
+        await window.aistudio.openSelectKey();
+      }
+      alert("이미지 생성 실패"); 
+    }
     finally { setIsGenerating(false); }
   };
 
@@ -266,7 +304,12 @@ const App: React.FC = () => {
         setUser(prev => ({ ...prev, ...updates }));
       }
 
-    } catch (e) { alert("처리 오류"); }
+    } catch (e: any) {
+      if (e.message?.includes("Requested entity was not found")) {
+        await window.aistudio.openSelectKey();
+      }
+      alert("처리 오류");
+    }
     finally { setIsProcessing(false); }
   };
 
@@ -320,7 +363,7 @@ const App: React.FC = () => {
         <section className="bg-surface rounded-3xl p-8 border border-border-color shadow-soft space-y-4">
           <div className="flex items-center gap-3 mb-2"><span className="material-symbols-outlined text-primary text-3xl">magic_button</span><h3 className="text-xl font-black">AI 이미지 4장 생성</h3></div>
           <div className="flex flex-col md:flex-row gap-4">
-            <textarea value={generationPrompt} onChange={(e) => setGenerationPrompt(e.target.value)} placeholder="예: 붉은 말 캐릭터, 로고 스타일, 흰색 배경" className="flex-1 p-5 rounded-2xl border border-border-color bg-background-light font-bold min-h-[100px] outline-none transition-all focus:border-primary shadow-inner" />
+            <textarea value={generationPrompt} onChange={(e) => setGenerationPrompt(e.target.value)} placeholder="예: 붉은 말 캐릭터, 로고 스타일, 흰색 배경 (이미지를 선택하면 해당 이미지에 배경을 입힙니다)" className="flex-1 p-5 rounded-2xl border border-border-color bg-background-light font-bold min-h-[100px] outline-none transition-all focus:border-primary shadow-inner" />
             <button disabled={isGenerating || !generationPrompt.trim()} onClick={handleGenerateImage} className="md:w-32 bg-primary hover:bg-primary-hover rounded-2xl font-black shadow-glow disabled:opacity-50 transition-all active:scale-95 border-b-2 border-primary-hover">
               {isGenerating ? <div className="animate-spin rounded-full h-6 w-6 border-2 border-text-main border-t-transparent mx-auto" /> : "생성하기"}
             </button>

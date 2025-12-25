@@ -5,25 +5,50 @@ import { GeminiAnalysisResponse } from "./types";
 /**
  * Service to handle image analysis and generation using Google Gemini API.
  */
-export async function generateAIImages(prompt: string, count: number = 4): Promise<string[]> {
+export async function generateAIImages(prompt: string, count: number = 4, referenceImage?: string): Promise<string[]> {
+  // Gemini 3 Pro Image 모델은 고품질 사진 및 배경 생성에 최적화되어 있습니다.
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const model = 'gemini-3-pro-image-preview';
+
   const promises = Array.from({ length: count }).map(async () => {
     try {
+      const parts: any[] = [];
+      
+      // 참조 이미지가 있는 경우 (배경 생성/편집 모드)
+      if (referenceImage) {
+        parts.push({
+          inlineData: {
+            data: referenceImage.split(",")[1],
+            mimeType: "image/png",
+          },
+        });
+      }
+      
+      // 텍스트 프롬프트 추가
+      parts.push({ text: prompt });
+
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
-        contents: {
-          parts: [{ text: `${prompt} --seed ${Math.floor(Math.random() * 1000000)}` }]
-        },
-        config: { imageConfig: { aspectRatio: "1:1" } }
+        model,
+        contents: { parts },
+        config: { 
+          imageConfig: { 
+            aspectRatio: "1:1",
+            imageSize: "1K" // 고해상도 설정
+          } 
+        }
       });
+
       if (response.candidates && response.candidates[0].content.parts) {
         for (const part of response.candidates[0].content.parts) {
           if (part.inlineData) return `data:image/png;base64,${part.inlineData.data}`;
         }
       }
-    } catch (e) { console.error("Generation failed", e); }
+    } catch (e) { 
+      console.error("Generation failed", e); 
+    }
     return null;
   });
+
   const generated = await Promise.all(promises);
   return generated.filter((img): img is string => img !== null);
 }
