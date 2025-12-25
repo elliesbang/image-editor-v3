@@ -366,10 +366,11 @@ export const App: React.FC = () => {
           const reader = new FileReader(); reader.onload = () => res(reader.result as string); reader.readAsDataURL(target.file);
         });
         const result = await processImage(base64, options);
+        const { outputFormat, ...processedData } = result;
         const fileAnalysis = analysisData.files.find(af => af.id === target.id);
-        setFiles(prev => prev.map(f => f.id === target.id ? { 
-          ...f, status: 'completed', 
-          result: { ...result, title: fileAnalysis?.title || '가공 이미지', keywords: fileAnalysis?.keywords || [], format: options.format, size: "" } 
+        setFiles(prev => prev.map(f => f.id === target.id ? {
+          ...f, status: 'completed',
+          result: { ...processedData, title: fileAnalysis?.title || '가공 이미지', keywords: fileAnalysis?.keywords || [], format: outputFormat, size: "" }
         } : f));
       }
 
@@ -529,7 +530,7 @@ export const App: React.FC = () => {
           <div className="space-y-4 border-t border-border-color pt-8">
             <label className="text-xs font-black text-text-sub uppercase">변환 포맷 및 상세 설정</label>
             <div className="flex gap-2">
-              {['png', 'svg', 'gif'].map(fmt => (
+              {['original', 'png', 'svg', 'gif'].map(fmt => (
                 <button key={fmt} onClick={() => setOptions(o => ({...o, format: fmt as any}))} className={`flex-1 py-4 rounded-xl border text-sm font-black transition-all ${options.format === fmt ? 'bg-text-main text-white shadow-lg' : 'bg-white border-border-color text-text-sub'}`}>{fmt.toUpperCase()}</button>
               ))}
             </div>

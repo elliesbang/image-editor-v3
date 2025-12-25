@@ -6,15 +6,15 @@
 
 export async function processImage(
   dataUrl: string,
-  options: { 
-    bgRemove: boolean; 
-    autoCrop: boolean; 
-    format: string; 
+  options: {
+    bgRemove: boolean;
+    autoCrop: boolean;
+    format: string;
     svgColors: number;
     resizeWidth: number;
     noiseLevel: number;
   }
-): Promise<{ processedUrl: string; width: number; height: number; svgContent?: string; svgColorsList?: string[] }> {
+): Promise<{ processedUrl: string; width: number; height: number; svgContent?: string; svgColorsList?: string[]; outputFormat: string }> {
   const img = new Image();
   img.src = dataUrl;
   await new Promise((resolve, reject) => {
@@ -162,7 +162,10 @@ export async function processImage(
 
   let svgContent: string | undefined;
   let svgColorsList: string[] | undefined;
-  let processedUrl = canvas.toDataURL(`image/png`);
+  const originalMime = dataUrl.match(/^data:(.*?);/)?.[1] || 'image/png';
+  const originalExtension = originalMime.split('/')[1]?.split('+')[0] || 'png';
+  let outputFormat = options.format === 'original' ? originalExtension : options.format;
+  let processedUrl = canvas.toDataURL(options.format === 'original' ? originalMime : `image/png`);
 
   if (options.format === 'svg') {
     const trace = await traceToSVG(canvas, options.svgColors);
@@ -172,11 +175,12 @@ export async function processImage(
     if (svgContent) {
       processedUrl = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svgContent)))}`;
     }
+    outputFormat = 'svg';
   }
 
   return {
     processedUrl,
-    width, height, svgContent, svgColorsList
+    width, height, svgContent, svgColorsList, outputFormat
   };
 }
 
