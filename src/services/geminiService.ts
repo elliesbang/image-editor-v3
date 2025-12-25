@@ -25,7 +25,9 @@ async function callGeminiEndpoint(body: Record<string, unknown>) {
  * Service to handle image analysis and generation using backend Gemini proxy.
  */
 export async function generateAIImages(prompt: string, count: number = 4, referenceImage?: string): Promise<string[]> {
-  if (generationInFlight) return [];
+  if (generationInFlight) {
+    throw new Error("이미지 생성이 이미 진행 중입니다. 잠시 후 다시 시도해 주세요.");
+  }
   generationInFlight = true;
 
   try {
@@ -51,10 +53,16 @@ export async function generateAIImages(prompt: string, count: number = 4, refere
     });
 
     const generated = await Promise.all(requests);
-    return generated.filter((img): img is string => img !== null);
+    const filtered = generated.filter((img): img is string => img !== null);
+
+    if (filtered.length === 0) {
+      throw new Error("생성된 이미지가 없습니다. 다시 시도해 주세요.");
+    }
+
+    return filtered;
   } catch (e) {
     console.error("Generation failed", e);
-    return [];
+    throw e instanceof Error ? e : new Error("이미지 생성에 실패했습니다.");
   } finally {
     generationInFlight = false;
   }
