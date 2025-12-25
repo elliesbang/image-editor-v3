@@ -88,7 +88,7 @@ const AdminDashboard = () => {
             <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden"><div className="h-full bg-primary w-3/4"></div></div>
             <p className="text-[10px] font-bold text-text-sub text-center">750GB 사용됨</p>
           </div>
-          <button onClick={handleLogout} className="w-full flex items-center gap-4 px-4 py-3 text-text-sub font-black text-sm hover:text-red-500"><span className="material-symbols-outlined">logout</span>로그아웃</button>
+          <button type="button" onClick={handleLogout} className="w-full flex items-center gap-4 px-4 py-3 text-text-sub font-black text-sm hover:text-red-500"><span className="material-symbols-outlined">logout</span>로그아웃</button>
         </div>
       </aside>
 
