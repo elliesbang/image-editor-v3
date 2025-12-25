@@ -266,21 +266,13 @@ export const App: React.FC = () => {
   const handleGenerateImage = async () => {
     if (!generationPrompt.trim() || isGenerating) return;
 
-    // TypeError: Cannot read properties of undefined (reading 'hasSelectedApiKey') 해결을 위한 방어 코드
-    const aiStudio = (window as any).aistudio;
-    if (!aiStudio) {
-      alert("AI 설정(aistudio)이 로딩 중입니다. 잠시 후 다시 시도해 주세요.");
-      return;
-    }
+    const geminiApiKey =
+      import.meta.env.VITE_GEMINI_API_KEY ||
+      (typeof process !== "undefined" ? process.env?.GEMINI_API_KEY : undefined);
 
-    try {
-      const hasKey = await aiStudio.hasSelectedApiKey();
-      if (!hasKey) {
-        await aiStudio.openSelectKey();
-        // 키 선택 창을 연 후에는 비동기적으로 진행되므로 가이드라인에 따라 즉시 진행을 시도합니다.
-      }
-    } catch (e: any) {
-      console.error("API Key check error:", e);
+    if (!geminiApiKey) {
+      alert("Gemini API 키가 설정되어 있지 않습니다. 관리자에게 문의해 주세요.");
+      return;
     }
 
     setIsGenerating(true);
@@ -306,13 +298,7 @@ export const App: React.FC = () => {
       setGenerationPrompt('');
     } catch (e: any) {
       console.error("Generation error:", e);
-      // API_KEY_INVALID 또는 Requested entity was not found 에러 처리
-      if (e.message?.includes("Requested entity was not found") || e.message?.includes("API_KEY_INVALID")) {
-        alert("유효한 API 키가 없습니다. 유료 API 키를 선택해 주세요.");
-        if (aiStudio.openSelectKey) await aiStudio.openSelectKey();
-      } else {
-        alert("이미지 생성 실패. 네트워크 또는 설정을 확인해 주세요.");
-      }
+      alert(e?.message || "이미지 생성 실패. 네트워크 또는 설정을 확인해 주세요.");
     } finally {
       setIsGenerating(false);
     }
