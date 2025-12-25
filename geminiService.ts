@@ -8,7 +8,7 @@ import { GeminiAnalysisResponse } from "./types";
 export async function generateAIImages(prompt: string, count: number = 4, referenceImage?: string): Promise<string[]> {
   // Gemini 3 Pro Image 모델은 고품질 사진 및 배경 생성에 최적화되어 있습니다.
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const model = 'gemini-3-pro-image-preview';
+  const model = 'gemini-2.0-flash-exp';
 
   const promises = Array.from({ length: count }).map(async () => {
     try {
@@ -57,7 +57,7 @@ export async function analyzeImages(
   images: { id: string; base64: string }[]
 ): Promise<GeminiAnalysisResponse> {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const model = "gemini-3-flash-preview";
+  const model = "gemini-2.0-flash-exp";
 
   const parts = images.map((img) => ({
     inlineData: {
