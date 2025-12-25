@@ -5,7 +5,7 @@ let generationInFlight = false;
 let analysisInFlight = false;
 
 async function callGeminiEndpoint(body: Record<string, unknown>) {
-  const response = await fetch("/generate-image", {
+  const response = await fetch("/api/generate-image", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

@@ -62,7 +62,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         if (data.session?.user) {
           await fetchRoleForUser(data.session.user.id);
         } else {
+          setRole(null);
           setRoleReady(true);
+          localStorage.removeItem('app_role');
         }
       } else {
         setRole(null);
@@ -70,8 +72,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
     };
 
-    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, nextSession) => {
+    const { data: listener } = supabase.auth.onAuthStateChange(async (event, nextSession) => {
       setSession(nextSession);
+
+      if (event === 'SIGNED_OUT') {
+        setRole(null);
+        setRoleReady(true);
+        localStorage.removeItem('app_role');
+        return;
+      }
+
       if (nextSession?.user) {
         await fetchRoleForUser(nextSession.user.id);
       } else {
