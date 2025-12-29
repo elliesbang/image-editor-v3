@@ -4,26 +4,18 @@ import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
 
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, '.', '')
+  loadEnv(mode, '.', '')
 
   return {
     plugins: [react()],
-
-    // ✅ Cloudflare Pages 필수
     base: '/',
-
-    server: {
-      port: 3000,
-      host: '0.0.0.0',
-    },
 
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': path.resolve(__dirname, 'src'),
       },
     },
 
-    // ✅ admin.html + index.html 둘 다 빌드
     build: {
       rollupOptions: {
         input: {
