@@ -26,13 +26,17 @@ export const ProtectedRoute = ({ children, allow }: Props) => {
   const [profileLoadError, setProfileLoadError] = useState<string | null>(null);
 
   useEffect(() => {
+    console.log('AdminRoute mounted');
+  }, []);
+
+  useEffect(() => {
     let active = true;
 
     const loadSessionAndRole = async () => {
       setCheckingSession(true);
       const { data, error } = await supabase.auth.getSession();
       const nextSession = error ? null : data.session;
-      console.log('admin route session', nextSession);
+      console.log('session result', nextSession);
       if (!active) return;
       setSession(nextSession);
       setCheckingSession(false);
@@ -43,6 +47,7 @@ export const ProtectedRoute = ({ children, allow }: Props) => {
       }
 
       setLoadingProfile(true);
+      setProfileLoadError(null);
       const { data: profileData, error: profileError } = await supabase
         .from('profiles')
         .select('role')
@@ -59,7 +64,7 @@ export const ProtectedRoute = ({ children, allow }: Props) => {
       }
 
       const normalizedRole = mapRole(profileData?.role);
-      console.log('admin role', normalizedRole ?? 'unknown');
+      console.log('profile role', normalizedRole ?? 'unknown');
       setProfileLoadError(null);
       setRole(normalizedRole);
       setLoadingProfile(false);
@@ -81,10 +86,23 @@ export const ProtectedRoute = ({ children, allow }: Props) => {
     }
   }, [allowedRoles, checkingSession, loadingProfile, navigate, role, session]);
 
-  if (checkingSession || loadingProfile) return <div className="flex h-screen items-center justify-center" />;
-  if (profileLoadError) return <div className="flex h-screen items-center justify-center text-sm font-bold">관리자 권한 확인 중입니다...</div>;
-  if (!session) return null;
-  if (!role || !allowedRoles.includes(role)) return null;
+  if (checkingSession || loadingProfile) {
+    return <div className="flex h-screen items-center justify-center text-sm font-bold">Loading admin...</div>;
+  }
+
+  if (profileLoadError) {
+    return <div className="flex h-screen items-center justify-center text-sm font-bold">관리자 권한 확인 중입니다...</div>;
+  }
+
+  if (!session) {
+    return <div className="flex h-screen items-center justify-center text-sm font-bold">로그인 페이지로 이동 중입니다...</div>;
+  }
+
+  if (!role || !allowedRoles.includes(role)) {
+    return <div className="flex h-screen items-center justify-center text-sm font-bold">홈으로 이동 중입니다...</div>;
+  }
+
+  console.log('render children');
 
   return <>{children}</>;
 };

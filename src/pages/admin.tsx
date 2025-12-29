@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabaseClient';
 import { useNavigate } from '../router/navigation';
 
 export const AdminDashboard = () => {
+  console.log('AdminDashboard render');
   const [activeTab, setActiveTab] = useState('dashboard');
   const [users, setUsers] = useState<any[]>([]);
   const [whitelist, setWhitelist] = useState<string[]>([]);
