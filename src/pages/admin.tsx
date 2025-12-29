@@ -14,18 +14,35 @@ export const AdminDashboard = () => {
 
   const fetchInitialData = async () => {
     setLoading(true);
-    const { data: profileData, error: profileError } = await supabase
-      .from('profiles')
-      .select('id, email, role, name, plan');
-    if (!profileError && profileData) setUsers(profileData);
+    console.log('fetchInitialData start');
+    try {
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('id, email, role, name, plan');
+      console.log('profiles result, profileError', profileData, profileError);
+      if (!profileError && profileData) {
+        setUsers(profileData);
+      } else {
+        setUsers([]);
+      }
 
-    const { data: whitelistData, error: whitelistError } = await supabase
-      .from('michina_whitelist')
-      .select('email')
-      .eq('active', true);
-    if (!whitelistError && whitelistData) setWhitelist(whitelistData.map(item => item.email));
-
-    setLoading(false);
+      const { data: whitelistData, error: whitelistError } = await supabase
+        .from('michina_whitelist')
+        .select('email')
+        .eq('active', true);
+      console.log('whitelist result, whitelistError', whitelistData, whitelistError);
+      if (!whitelistError && whitelistData) {
+        setWhitelist(whitelistData.map(item => item.email));
+      } else {
+        setWhitelist([]);
+      }
+    } catch (error) {
+      console.error('fetchInitialData error', error);
+      alert('데이터를 불러오지 못했습니다. 콘솔 로그를 확인해주세요.');
+    } finally {
+      console.log('fetchInitialData end');
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
