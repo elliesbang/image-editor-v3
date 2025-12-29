@@ -1,11 +1,42 @@
 
 import React, { useState, useEffect } from 'react';
 import { ImageData, ProcessingOptions, GeminiAnalysisResponse } from './types';
-import { analyzeImages, generateAIImages } from './services/geminiService';
-import { processImage } from './services/imageProcessor';
-import { supabase } from './lib/supabaseClient';
-import { useAuth } from './auth/AuthContext';
-import { useLocationPath, useNavigate } from './router';
+import { analyzeImages, generateAIImages } from './geminiService';
+import { processImage } from './imageProcessor';
+
+// Firebase SDK Imports (CDN)
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+import { 
+  getAuth, 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signInWithPopup, 
+  GoogleAuthProvider, 
+  onAuthStateChanged,
+  signOut 
+} from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+import { 
+  getFirestore, 
+  doc, 
+  getDoc, 
+  setDoc,
+  updateDoc
+} from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCUJColyeKcWo0CSN-6_k3urHkL2Haq91Q",
+  authDomain: "gen-lang-client-0303289355.firebaseapp.com",
+  projectId: "gen-lang-client-0303289355",
+  storageBucket: "gen-lang-client-0303289355.firebasestorage.app",
+  messagingSenderId: "1059346647906",
+  appId: "1:1059346647906:web:865529f7f4575836262450",
+  measurementId: "G-H9M9C074C5"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const googleProvider = new GoogleAuthProvider();
 
 type PlanType = 'free' | 'basic' | 'standard' | 'premium' | 'michina';
 type UserRole = 'special' | 'normal' | 'admin';
@@ -17,7 +48,7 @@ interface UserAuth {
   name: string;
   role: UserRole;
   plan: PlanType;
-  credit: number | 'unlimited';
+  credits: number | 'unlimited';
   svgUsage: number;
   svgLimit: number | 'unlimited';
   gifUsage: number;
@@ -32,45 +63,29 @@ export const App: React.FC = () => {
   const [generationPrompt, setGenerationPrompt] = useState('');
   const [commonKeywords, setCommonKeywords] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
-
+  
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showSignupModal, setShowSignupModal] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
   const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
-
+  
   const [loginForm, setLoginForm] = useState({ email: '', password: '', role: 'normal' as UserRole });
-  const [signupForm, setSignupForm] = useState({ name: '', email: '', password: '' });
-  const [authError, setAuthError] = useState('');
-
+  const [signupForm, setSignupForm] = useState({ name: '', email: '', password: '', role: 'normal' as UserRole });
+  
   const [user, setUser] = useState<UserAuth>(() => {
-    const baseUser: UserAuth = {
-      uid: '',
-      isLoggedIn: false,
-      email: '',
-      name: '',
-      role: 'normal',
-      plan: 'free',
-      credit: 30,
-      svgUsage: 0,
-      svgLimit: 5,
-      gifUsage: 0,
-      gifLimit: 5,
-    };
-
     try {
       const saved = localStorage.getItem('genius_user_cache');
-      if (!saved) return baseUser;
-
-      const parsed = JSON.parse(saved);
-      return {
-        ...baseUser,
-        ...parsed,
-        credit: parsed.credit ?? baseUser.credit,
+      return saved ? JSON.parse(saved) : {
+        uid: '', isLoggedIn: false, email: '', name: '', role: 'normal',
+        plan: 'free', credits: 30, svgUsage: 0, svgLimit: 5, gifUsage: 0, gifLimit: 5
       };
     } catch (e) {
-      return baseUser;
+      return {
+        uid: '', isLoggedIn: false, email: '', name: '', role: 'normal',
+        plan: 'free', credits: 30, svgUsage: 0, svgLimit: 5, gifUsage: 0, gifLimit: 5
+      };
     }
   });
 
@@ -78,68 +93,40 @@ export const App: React.FC = () => {
     bgRemove: true, autoCrop: true, format: 'png', svgColors: 6, resizeWidth: 1080, noiseLevel: 0, gifMotion: '부드럽게 좌우로 흔들리는 효과'
   });
 
-  const { role, roleReady, loading, refreshRole } = useAuth();
-  const navigate = useNavigate();
-  const currentPath = useLocationPath();
-
-  const mapProfileToUserState = (profile: any, supabaseUser: any): UserAuth => {
-    const dbRole = (profile?.role || 'user') as 'user' | 'michina' | 'admin';
-    const mappedRole: UserRole = dbRole === 'admin' ? 'admin' : dbRole === 'michina' ? 'special' : 'normal';
-
-    return {
-      uid: supabaseUser.id,
-      isLoggedIn: true,
-      email: supabaseUser.email || profile?.email || '',
-      name: profile?.name || supabaseUser.email || '사용자',
-      role: mappedRole,
-      plan: profile?.plan || 'free',
-      credit: profile?.credit ?? 30,
-      svgUsage: profile?.svg_usage || 0,
-      svgLimit: profile?.svg_limit ?? 5,
-      gifUsage: profile?.gif_usage || 0,
-      gifLimit: profile?.gif_limit ?? 5,
-    };
-  };
-
-  const fetchProfile = async (userId: string) => {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('id, role, email, name, plan, credit, svg_usage, svg_limit, gif_usage, gif_limit')
-      .eq('id', userId)
-      .single();
-
-    if (error) throw error;
-    return data;
-  };
-
-  const refreshUserState = async (userId: string, sessionUser: any) => {
-    try {
-      const profile = await fetchProfile(userId);
-      const mapped = mapProfileToUserState(profile, sessionUser);
-      setUser(mapped);
-      localStorage.setItem('genius_user_cache', JSON.stringify(mapped));
-    } catch (error) {
-      console.error('Profile load failed', error);
-      setUser(prev => {
-        const newState = { ...prev, isLoggedIn: false };
-        localStorage.setItem('genius_user_cache', JSON.stringify(newState));
-        return newState;
-      });
-    }
-  };
-
   useEffect(() => {
-    const initAuth = async () => {
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (sessionData.session?.user) {
-        await refreshUserState(sessionData.session.user.id, sessionData.session.user);
-      }
-    };
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        const userDocRef = doc(db, "users", firebaseUser.uid);
+        const userDoc = await getDoc(userDocRef);
+        const configDoc = await getDoc(doc(db, "settings", "whitelist"));
+        const whitelist: string[] = configDoc.exists() ? configDoc.data().emails || [] : [];
 
-    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session?.user) {
-        refreshUserState(session.user.id, session.user);
-      } else if (event === 'SIGNED_OUT') {
+        if (userDoc.exists()) {
+          let userData = userDoc.data();
+          if (userData.role !== 'admin' && whitelist.includes(firebaseUser.email || '')) {
+            if (userData.plan !== 'michina') {
+              await updateDoc(userDocRef, { plan: 'michina', credits: 'unlimited', svgLimit: 'unlimited', gifLimit: 'unlimited' });
+              userData = { ...userData, plan: 'michina', credits: 'unlimited', svgLimit: 'unlimited', gifLimit: 'unlimited' };
+            }
+          }
+
+          const updatedUser: UserAuth = {
+            uid: firebaseUser.uid,
+            isLoggedIn: true,
+            email: firebaseUser.email || '',
+            name: userData.name || '사용자',
+            role: userData.role || 'normal',
+            plan: userData.plan || 'free',
+            credits: userData.credits ?? 30,
+            svgUsage: userData.svgUsage || 0,
+            svgLimit: userData.svgLimit ?? 5,
+            gifUsage: userData.gifUsage || 0,
+            gifLimit: userData.gifLimit ?? 5
+          };
+          setUser(updatedUser);
+          localStorage.setItem('genius_user_cache', JSON.stringify(updatedUser));
+        }
+      } else {
         setUser(prev => {
           const newState = { ...prev, isLoggedIn: false };
           localStorage.setItem('genius_user_cache', JSON.stringify(newState));
@@ -147,24 +134,8 @@ export const App: React.FC = () => {
         });
       }
     });
-
-    initAuth();
-    return () => {
-      listener?.subscription.unsubscribe();
-    };
+    return () => unsubscribe();
   }, []);
-
-  useEffect(() => {
-    if (!loading && roleReady && role === 'admin') {
-      navigate('/admin', { replace: true });
-    }
-  }, [loading, roleReady, role, navigate]);
-
-  useEffect(() => {
-    if (currentPath === '/login') {
-      setShowLoginModal(true);
-    }
-  }, [currentPath]);
 
   const copyToClipboard = async (text: string) => {
     try {
@@ -175,135 +146,65 @@ export const App: React.FC = () => {
 
   const handleSignup = async () => {
     try {
-      setAuthError('');
-      const { error } = await supabase.auth.signUp({
+      const userCredential = await createUserWithEmailAndPassword(auth, signupForm.email, signupForm.password);
+      const newUser = userCredential.user;
+      const plan = signupForm.role === 'special' ? 'michina' : 'free';
+      const userData = {
+        uid: newUser.uid,
+        name: signupForm.name,
         email: signupForm.email,
-        password: signupForm.password,
-        options: { data: { name: signupForm.name } },
-      });
-
-      if (error) throw error;
-      alert('회원가입 성공! 이메일 인증 후 로그인해 주세요.');
+        role: signupForm.role,
+        plan: plan,
+        credits: plan === 'michina' ? 'unlimited' : 30,
+        svgLimit: plan === 'michina' ? 'unlimited' : 5,
+        svgUsage: 0,
+        gifLimit: plan === 'michina' ? 'unlimited' : 5,
+        gifUsage: 0
+      };
+      await setDoc(doc(db, "users", newUser.uid), userData);
+      alert("회원가입 성공!");
       setShowSignupModal(false);
-      setShowLoginModal(true);
-    } catch (error: any) {
-      setAuthError(error.message || '회원가입에 실패했습니다.');
-      alert(error.message || '회원가입에 실패했습니다.');
-    }
-  };
-
-  const promoteMichinaIfWhitelisted = async (email: string | null, userId: string, currentRole: string) => {
-    if (!email || currentRole !== 'user') return currentRole;
-    const normalized = email.toLowerCase();
-    const { data, error } = await supabase
-      .from('michina_whitelist')
-      .select('email, active')
-      .eq('email', normalized)
-      .eq('active', true)
-      .maybeSingle();
-
-    if (error) {
-      console.error('Whitelist check failed', error);
-      return currentRole;
-    }
-
-    if (data?.email) {
-      const { error: updateError } = await supabase
-        .from('profiles')
-        .update({ role: 'michina' })
-        .eq('id', userId);
-      if (updateError) console.error('Failed to promote to michina', updateError);
-      return 'michina';
-    }
-
-    return currentRole;
-  };
-
-  const closeAllModals = () => {
-    setShowLoginModal(false);
-    setShowSignupModal(false);
-    setShowUpgradeModal(false);
-    setShowTermsModal(false);
-    setShowPrivacyModal(false);
+    } catch (error: any) { alert(error.message); }
   };
 
   const handleLogin = async () => {
     try {
-      setAuthError('');
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: loginForm.email,
-        password: loginForm.password,
-      });
-
-      if (error || !data.session) throw error || new Error('로그인 실패');
-
-      console.log('login success', data.session);
-      navigate('/admin', { replace: true });
-
-      if (!data.user) throw new Error('로그인 실패');
-
-      const profile = await fetchProfile(data.user.id);
-      const promotedRole = await promoteMichinaIfWhitelisted(data.user.email, data.user.id, profile.role || 'user');
-      const finalProfile = promotedRole !== profile.role ? { ...profile, role: promotedRole } : profile;
-
-      let allowed = true;
-      let rejectionMessage = '';
-      if (loginForm.role === 'admin' && promotedRole !== 'admin') {
-        allowed = false;
-        rejectionMessage = '관리자 계정이 아닙니다';
-      } else if (loginForm.role === 'special' && !(promotedRole === 'michina' || promotedRole === 'admin')) {
-        allowed = false;
-        rejectionMessage = '미치나 전용 계정이 아닙니다';
+      const userCredential = await signInWithEmailAndPassword(auth, loginForm.email, loginForm.password);
+      const firebaseUser = userCredential.user;
+      const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
+      if (userDoc.exists()) {
+        const userData = userDoc.data();
+        if (userData.role === 'admin') window.location.href = 'admin.html';
+        else setShowLoginModal(false);
       }
-
-      if (!allowed) {
-        await supabase.auth.signOut();
-        setAuthError(rejectionMessage || '권한이 없습니다.');
-        alert(rejectionMessage || '권한이 없습니다.');
-        return;
-      }
-
-      const mapped = mapProfileToUserState(finalProfile, data.user);
-      setUser(mapped);
-      localStorage.setItem('genius_user_cache', JSON.stringify(mapped));
-      const fetchedRole = await refreshRole(data.user.id);
-      closeAllModals();
-      if (fetchedRole === 'admin') {
-        return;
-      }
-      if (loginForm.role === 'special') navigate('/michina', { replace: true });
-      else navigate('/home', { replace: true });
-    } catch (error: any) {
-      setAuthError(error?.message || '로그인에 실패했습니다.');
-      alert(error?.message || '로그인에 실패했습니다.');
-    }
+    } catch (error: any) { alert(error.message); }
   };
 
   const handleGoogleLogin = async () => {
-    alert('현재는 이메일 로그인만 지원합니다.');
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      const firebaseUser = result.user;
+      let userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
+      if (!userDoc.exists()) {
+        const userData = {
+          uid: firebaseUser.uid,
+          name: firebaseUser.displayName || 'User',
+          email: firebaseUser.email || '',
+          role: 'normal', plan: 'free', credits: 30, svgLimit: 5, svgUsage: 0, gifLimit: 5, gifUsage: 0
+        };
+        await setDoc(doc(db, "users", firebaseUser.uid), userData);
+        userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
+      }
+      const userData = userDoc.data();
+      if (userData?.role === 'admin') window.location.href = 'admin.html';
+      else setShowLoginModal(false);
+    } catch (error: any) { alert(error.message); }
   };
 
   const handleLogout = async () => {
-    closeAllModals();
-    console.log('로그아웃 버튼 클릭됨');
-    await supabase.auth.signOut();
-    setUser({
-      uid: '',
-      isLoggedIn: false,
-      email: '',
-      name: '',
-      role: 'normal',
-      plan: 'free',
-      credit: 30,
-      svgUsage: 0,
-      svgLimit: 5,
-      gifUsage: 0,
-      gifLimit: 5,
-    });
+    await signOut(auth);
+    setUser(p => ({...p, isLoggedIn: false}));
     localStorage.removeItem('genius_user_cache');
-    localStorage.removeItem('app_role');
-    sessionStorage.clear();
-    window.location.href = '/';
   };
 
   const handleFiles = (incomingFiles: File[]) => {
@@ -316,6 +217,23 @@ export const App: React.FC = () => {
 
   const handleGenerateImage = async () => {
     if (!generationPrompt.trim() || isGenerating) return;
+
+    // TypeError: Cannot read properties of undefined (reading 'hasSelectedApiKey') 해결을 위한 방어 코드
+    const aiStudio = (window as any).aistudio;
+    if (!aiStudio) {
+      alert("AI 설정(aistudio)이 로딩 중입니다. 잠시 후 다시 시도해 주세요.");
+      return;
+    }
+
+    try {
+      const hasKey = await aiStudio.hasSelectedApiKey();
+      if (!hasKey) {
+        await aiStudio.openSelectKey();
+        // 키 선택 창을 연 후에는 비동기적으로 진행되므로 가이드라인에 따라 즉시 진행을 시도합니다.
+      }
+    } catch (e: any) {
+      console.error("API Key check error:", e);
+    }
 
     setIsGenerating(true);
     try {
@@ -340,7 +258,13 @@ export const App: React.FC = () => {
       setGenerationPrompt('');
     } catch (e: any) {
       console.error("Generation error:", e);
-      alert(e?.message || "이미지 생성 실패. 네트워크 또는 설정을 확인해 주세요.");
+      // API_KEY_INVALID 또는 Requested entity was not found 에러 처리
+      if (e.message?.includes("Requested entity was not found") || e.message?.includes("API_KEY_INVALID")) {
+        alert("유효한 API 키가 없습니다. 유료 API 키를 선택해 주세요.");
+        if (aiStudio.openSelectKey) await aiStudio.openSelectKey();
+      } else {
+        alert("이미지 생성 실패. 네트워크 또는 설정을 확인해 주세요.");
+      }
     } finally {
       setIsGenerating(false);
     }
@@ -350,7 +274,7 @@ export const App: React.FC = () => {
     if (files.length === 0) return;
     const targets = files.filter(f => selectedIds.size === 0 || selectedIds.has(f.id));
     
-    if (user.credit !== 'unlimited' && (user.credit as number) < targets.length) {
+    if (user.credits !== 'unlimited' && (user.credits as number) < targets.length) {
       alert("크레딧이 부족합니다.");
       setShowUpgradeModal(true);
       return;
@@ -380,26 +304,20 @@ export const App: React.FC = () => {
           const reader = new FileReader(); reader.onload = () => res(reader.result as string); reader.readAsDataURL(target.file);
         });
         const result = await processImage(base64, options);
-        const { outputFormat, ...processedData } = result;
         const fileAnalysis = analysisData.files.find(af => af.id === target.id);
-        setFiles(prev => prev.map(f => f.id === target.id ? {
-          ...f, status: 'completed',
-          result: { ...processedData, title: fileAnalysis?.title || '가공 이미지', keywords: fileAnalysis?.keywords || [], format: outputFormat, size: "" }
+        setFiles(prev => prev.map(f => f.id === target.id ? { 
+          ...f, status: 'completed', 
+          result: { ...result, title: fileAnalysis?.title || '가공 이미지', keywords: fileAnalysis?.keywords || [], format: options.format === 'original' ? target.file.name.split('.').pop() || 'png' : options.format, size: "" } 
         } : f));
       }
 
       const updates: any = {};
-      if (user.credit !== 'unlimited') updates.credit = (user.credit as number) - targets.length;
+      if (user.credits !== 'unlimited') updates.credits = (user.credits as number) - targets.length;
       if (options.format === 'svg' && user.svgLimit !== 'unlimited') updates.svgUsage = user.svgUsage + targets.length;
       if (options.format === 'gif' && user.gifLimit !== 'unlimited') updates.gifUsage = user.gifUsage + targets.length;
-
-      if (Object.keys(updates).length > 0 && user.uid) {
-        const payload: any = { credit: updates.credit };
-        if (typeof updates.svgUsage !== 'undefined') payload.svg_usage = updates.svgUsage;
-        if (typeof updates.gifUsage !== 'undefined') payload.gif_usage = updates.gifUsage;
-
-        const { error } = await supabase.from('profiles').update(payload).eq('id', user.uid);
-        if (error) console.error('사용 기록 업데이트 실패', error);
+      
+      if (Object.keys(updates).length > 0) {
+        await updateDoc(doc(db, "users", user.uid), updates);
         setUser(prev => ({ ...prev, ...updates }));
       }
     } catch (e: any) {
@@ -447,14 +365,10 @@ export const App: React.FC = () => {
             <span className="material-symbols-outlined text-lg">workspace_premium</span>
             업그레이드
           </button>
-          <button onClick={() => { console.log('admin dashboard click'); navigate('/admin'); }} className="flex items-center gap-2 px-5 py-2.5 bg-background-light border border-border-color rounded-2xl font-black text-sm">
-            <span className="material-symbols-outlined text-lg">shield_person</span>
-            관리자 대시보드
-          </button>
           {user.isLoggedIn ? (
-            <button type="button" onClick={handleLogout} className="px-5 py-2.5 bg-background-light border border-border-color rounded-2xl font-black text-sm">로그아웃</button>
+            <button onClick={handleLogout} className="px-5 py-2.5 bg-background-light border border-border-color rounded-2xl font-black text-sm">로그아웃</button>
           ) : (
-            <button type="button" onClick={() => setShowLoginModal(true)} className="px-5 py-2.5 bg-background-light border border-border-color rounded-2xl font-black text-sm">로그인</button>
+            <button onClick={() => setShowLoginModal(true)} className="px-5 py-2.5 bg-background-light border border-border-color rounded-2xl font-black text-sm">로그인</button>
           )}
         </div>
       </header>
@@ -505,40 +419,14 @@ export const App: React.FC = () => {
               <div className="text-left font-black uppercase text-sm tracking-tight">자동 여백 크롭 {options.autoCrop ? 'ON' : 'OFF'}</div>
               <span className={`material-symbols-outlined ${options.autoCrop ? 'text-primary' : 'text-text-sub'}`}>{options.autoCrop ? 'check_circle' : 'radio_button_unchecked'}</span>
             </button>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="bg-background-light p-4 rounded-2xl border border-border-color shadow-inner space-y-2">
-              <div className="flex items-center justify-between text-sm font-black text-text-main">
-                <span>리사이즈 (가로 기준)</span>
-                <span className="text-xs text-text-sub">세로 자동 비율</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <input
-                  type="number"
-                  min={0}
-                  className="flex-1 px-3 py-2 rounded-xl border border-border-color bg-white text-sm font-bold outline-none"
-                  value={options.resizeWidth}
-                  onChange={(e) => setOptions(o => ({...o, resizeWidth: Math.max(0, Number(e.target.value))}))}
-                />
-                <span className="text-xs font-black text-text-sub">px</span>
-              </div>
-              <p className="text-[11px] text-text-sub font-bold">0 입력 시 원본 크기 유지</p>
+            {/* 리사이즈 및 노이즈 제거 옵션 추가 */}
+            <div className="p-5 rounded-2xl border bg-background-light border-border-color shadow-inner flex items-center justify-between">
+              <div className="text-left font-black uppercase text-sm tracking-tight">가로 리사이즈 (px)</div>
+              <input type="number" value={options.resizeWidth} onChange={(e) => setOptions(o => ({...o, resizeWidth: parseInt(e.target.value) || 0}))} className="w-24 p-2 rounded-lg border border-border-color text-right font-bold outline-none focus:border-primary" min="0" />
             </div>
-            <div className="bg-background-light p-4 rounded-2xl border border-border-color shadow-inner space-y-2">
-              <div className="flex items-center justify-between text-sm font-black text-text-main">
-                <span>노이즈 제거</span>
-                <span className="text-xs text-text-sub">강도 {options.noiseLevel}</span>
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={5}
-                step={1}
-                value={options.noiseLevel}
-                onChange={(e) => setOptions(o => ({...o, noiseLevel: Number(e.target.value)}))}
-                className="w-full accent-primary"
-              />
-              <p className="text-[11px] text-text-sub font-bold">필요 시만 사용하세요. 강도가 높을수록 디테일이 부드러워집니다.</p>
+            <div className="p-5 rounded-2xl border bg-background-light border-border-color shadow-inner flex items-center justify-between">
+              <div className="text-left font-black uppercase text-sm tracking-tight">노이즈 제거 레벨</div>
+              <input type="number" value={options.noiseLevel} onChange={(e) => setOptions(o => ({...o, noiseLevel: parseInt(e.target.value) || 0}))} className="w-24 p-2 rounded-lg border border-border-color text-right font-bold outline-none focus:border-primary" min="0" max="100" />
             </div>
           </div>
           <div className="space-y-4 border-t border-border-color pt-8">
@@ -629,9 +517,9 @@ export const App: React.FC = () => {
       </footer>
 
       {showUpgradeModal && (
-        <div className="fixed inset-0 z-[140] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200" onClick={closeAllModals}>
-          <div className="bg-white w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-[2.5rem] shadow-2xl relative p-8 md:p-12" onClick={e => e.stopPropagation()}>
-            <button onClick={closeAllModals} className="absolute top-8 right-8 text-text-sub hover:text-text-main transition-colors">
+        <div className="fixed inset-0 z-[140] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-[2.5rem] shadow-2xl relative p-8 md:p-12">
+            <button onClick={() => setShowUpgradeModal(false)} className="absolute top-8 right-8 text-text-sub hover:text-text-main transition-colors">
               <span className="material-symbols-outlined text-3xl">close</span>
             </button>
             <div className="text-center space-y-2 mb-10">
@@ -698,9 +586,9 @@ export const App: React.FC = () => {
       )}
 
       {showLoginModal && (
-        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={closeAllModals}>
-          <div className="bg-surface w-full max-w-md rounded-[2.5rem] shadow-2xl p-10 space-y-6 relative" onClick={e => e.stopPropagation()}>
-            <button onClick={closeAllModals} className="absolute top-8 right-8 text-text-sub hover:text-text-main"><span className="material-symbols-outlined text-2xl">close</span></button>
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div className="bg-surface w-full max-w-md rounded-[2.5rem] shadow-2xl p-10 space-y-6 relative">
+            <button onClick={() => setShowLoginModal(false)} className="absolute top-8 right-8 text-text-sub hover:text-text-main"><span className="material-symbols-outlined text-2xl">close</span></button>
             <h3 className="text-3xl font-black">로그인</h3>
             <div className="space-y-4">
               <div className="flex gap-2 p-1 bg-background-light rounded-xl border border-border-color">
@@ -727,14 +615,21 @@ export const App: React.FC = () => {
       )}
 
       {showSignupModal && (
-        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" onClick={closeAllModals}>
-          <div className="bg-surface w-full max-w-md rounded-[2.5rem] shadow-2xl p-10 space-y-6 relative" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+          <div className="bg-surface w-full max-w-md rounded-[2.5rem] shadow-2xl p-10 space-y-6 relative">
             <button onClick={() => {setShowSignupModal(false); setShowLoginModal(true);}} className="absolute top-8 left-8 text-text-sub hover:text-text-main flex items-center gap-1">
               <span className="material-symbols-outlined text-xl">arrow_back</span>
               <span className="text-xs font-black">로그인으로</span>
             </button>
             <h3 className="text-3xl font-black mt-4">회원가입</h3>
             <div className="space-y-4">
+              <div className="flex gap-2 p-1 bg-background-light rounded-xl border border-border-color">
+                {(['normal', 'special'] as UserRole[]).map(r => (
+                  <button key={r} onClick={() => setSignupForm(p => ({...p, role: r}))} className={`flex-1 py-2 rounded-lg text-xs font-black transition-all ${signupForm.role === r ? 'bg-primary shadow-sm' : 'text-text-sub'}`}>
+                    {r === 'special' ? '미치나 가입' : '일반 가입'}
+                  </button>
+                ))}
+              </div>
               <input type="text" placeholder="이름" value={signupForm.name} onChange={e => setSignupForm(p => ({...p, name: e.target.value}))} className="w-full p-5 rounded-2xl border border-border-color bg-background-light font-bold" />
               <input type="email" placeholder="이메일" value={signupForm.email} onChange={e => setSignupForm(p => ({...p, email: e.target.value}))} className="w-full p-5 rounded-2xl border border-border-color bg-background-light font-bold" />
               <input type="password" placeholder="비밀번호" value={signupForm.password} onChange={e => setSignupForm(p => ({...p, password: e.target.value}))} className="w-full p-5 rounded-2xl border border-border-color bg-background-light font-bold" />
@@ -745,9 +640,9 @@ export const App: React.FC = () => {
       )}
 
       {showTermsModal && (
-        <div className="fixed inset-0 z-[160] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={closeAllModals}>
-          <div className="bg-white w-full max-w-2xl max-h-[80vh] overflow-y-auto rounded-[2rem] p-10 space-y-4 shadow-2xl relative" onClick={e => e.stopPropagation()}>
-            <button onClick={closeAllModals} className="absolute top-8 right-8 text-text-sub hover:text-text-main"><span className="material-symbols-outlined">close</span></button>
+        <div className="fixed inset-0 z-[160] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-2xl max-h-[80vh] overflow-y-auto rounded-[2rem] p-10 space-y-4 shadow-2xl relative">
+            <button onClick={() => setShowTermsModal(false)} className="absolute top-8 right-8 text-text-sub hover:text-text-main"><span className="material-symbols-outlined">close</span></button>
             <h2 className="text-3xl font-black mb-6">이용약관</h2>
             <div className="text-sm font-bold text-text-sub space-y-5 leading-relaxed">
               <p>제1조 (목적) 본 약관은 ImageGenius가 제공하는 이미지 편집 서비스의 이용 조건 및 절차를 규정합니다.</p>
@@ -755,15 +650,15 @@ export const App: React.FC = () => {
               <p>제3조 (저작권) 서비스로 생성된 결과물의 저작권은 사용자에게 귀속되나, AI 모델의 특성상 동일하거나 유사한 결과가 다른 사용자에게 생성될 수 있음을 동의합니다.</p>
               <p>제4조 (금지사항) 불법적인 성인물 생성, 타인의 명예 훼손, 지적 재산권 침해 도구로 서비스를 사용하는 것을 엄격히 금지합니다.</p>
             </div>
-            <button onClick={closeAllModals} className="w-full py-4 bg-primary rounded-2xl font-black mt-8 text-lg border-b-4 border-primary-hover">확인했습니다</button>
+            <button onClick={() => setShowTermsModal(false)} className="w-full py-4 bg-primary rounded-2xl font-black mt-8 text-lg border-b-4 border-primary-hover">확인했습니다</button>
           </div>
         </div>
       )}
 
       {showPrivacyModal && (
-        <div className="fixed inset-0 z-[160] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={closeAllModals}>
-          <div className="bg-white w-full max-w-2xl max-h-[80vh] overflow-y-auto rounded-[2rem] p-10 space-y-4 shadow-2xl relative" onClick={e => e.stopPropagation()}>
-            <button onClick={closeAllModals} className="absolute top-8 right-8 text-text-sub hover:text-text-main"><span className="material-symbols-outlined">close</span></button>
+        <div className="fixed inset-0 z-[160] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-2xl max-h-[80vh] overflow-y-auto rounded-[2rem] p-10 space-y-4 shadow-2xl relative">
+            <button onClick={() => setShowPrivacyModal(false)} className="absolute top-8 right-8 text-text-sub hover:text-text-main"><span className="material-symbols-outlined">close</span></button>
             <h2 className="text-3xl font-black mb-6">개인정보처리방침</h2>
             <div className="text-sm font-bold text-text-sub space-y-5 leading-relaxed">
               <p>1. 수집하는 개인정보: 이메일 주소, 이름, 계정 역할(관리자, 미치나, 일반), 서비스 이용 기록.</p>
@@ -771,7 +666,7 @@ export const App: React.FC = () => {
               <p>3. 개인정보의 보유 및 이용기간: 회원 탈퇴 시까지 또는 법령이 정한 기간 동안 보관합니다.</p>
               <p>4. 개인정보의 파기: 수집 목적이 달성되면 해당 정보를 지체 없이 파기합니다.</p>
             </div>
-            <button onClick={closeAllModals} className="w-full py-4 bg-primary rounded-2xl font-black mt-8 text-lg border-b-4 border-primary-hover">확인했습니다</button>
+            <button onClick={() => setShowPrivacyModal(false)} className="w-full py-4 bg-primary rounded-2xl font-black mt-8 text-lg border-b-4 border-primary-hover">확인했습니다</button>
           </div>
         </div>
       )}

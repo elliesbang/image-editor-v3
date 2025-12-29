@@ -6,15 +6,15 @@
 
 export async function processImage(
   dataUrl: string,
-  options: {
-    bgRemove: boolean;
-    autoCrop: boolean;
-    format: string;
+  options: { 
+    bgRemove: boolean; 
+    autoCrop: boolean; 
+    format: string; 
     svgColors: number;
     resizeWidth: number;
     noiseLevel: number;
   }
-): Promise<{ processedUrl: string; width: number; height: number; svgContent?: string; svgColorsList?: string[]; outputFormat: string }> {
+): Promise<{ processedUrl: string; width: number; height: number; svgContent?: string; svgColorsList?: string[] }> {
   const img = new Image();
   img.src = dataUrl;
   await new Promise((resolve, reject) => {
@@ -144,28 +144,9 @@ export async function processImage(
     width = canvas.width; height = canvas.height;
   }
 
-  // 4. Noise Reduction (adjustable blur)
-  if (options.noiseLevel > 0) {
-    const noiseCanvas = document.createElement('canvas');
-    noiseCanvas.width = canvas.width;
-    noiseCanvas.height = canvas.height;
-    const nctx = noiseCanvas.getContext('2d', { willReadFrequently: true });
-    if (!nctx) throw new Error("Canvas context missing");
-
-    nctx.filter = `blur(${options.noiseLevel}px)`;
-    nctx.drawImage(canvas, 0, 0);
-    nctx.filter = 'none';
-
-    canvas = noiseCanvas;
-    ctx = nctx;
-  }
-
   let svgContent: string | undefined;
   let svgColorsList: string[] | undefined;
-  const originalMime = dataUrl.match(/^data:(.*?);/)?.[1] || 'image/png';
-  const originalExtension = originalMime.split('/')[1]?.split('+')[0] || 'png';
-  let outputFormat = options.format === 'original' ? originalExtension : options.format;
-  let processedUrl = canvas.toDataURL(options.format === 'original' ? originalMime : `image/png`);
+  let processedUrl = canvas.toDataURL(`image/png`);
 
   if (options.format === 'svg') {
     const trace = await traceToSVG(canvas, options.svgColors);
@@ -175,12 +156,11 @@ export async function processImage(
     if (svgContent) {
       processedUrl = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svgContent)))}`;
     }
-    outputFormat = 'svg';
   }
 
   return {
     processedUrl,
-    width, height, svgContent, svgColorsList, outputFormat
+    width, height, svgContent, svgColorsList
   };
 }
 
