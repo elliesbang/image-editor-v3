@@ -1,27 +1,31 @@
-export const onRequestPost: PagesFunction<{
-  GEMINI_API_KEY: string;
-}> = async ({ request, env }) => {
-  if (request.method !== "POST") {
-    return new Response("Method Not Allowed", { status: 405 });
-  }
+export async function onRequestPost(context: {
+  request: Request;
+  env: { GEMINI_API_KEY?: string } & Record<string, unknown>;
+}) {
+  const { request, env } = context;
+
+  console.log("[generate-image] Function entry");
 
   const geminiEndpoint =
     "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent";
-
-  console.log("[generate-image] Request method:", request.method);
-  console.log("[generate-image] Gemini endpoint:", geminiEndpoint);
 
   let body: any;
   try {
     body = await request.json();
   } catch (error) {
-    return new Response("Invalid JSON body", { status: 400 });
+    return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   const { prompt, referenceImage, images, config } = body || {};
 
   if (!prompt) {
-    return new Response("Prompt is required", { status: 400 });
+    return new Response(JSON.stringify({ error: "Prompt is required" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   if (!env.GEMINI_API_KEY) {
@@ -60,6 +64,8 @@ export const onRequestPost: PagesFunction<{
 
     const generationConfig = config || {};
 
+    console.log("[generate-image] Gemini fetch starting");
+
     const response = await fetch(`${geminiEndpoint}?key=${env.GEMINI_API_KEY}`, {
       method: "POST",
       headers: {
@@ -95,4 +101,4 @@ export const onRequestPost: PagesFunction<{
       headers: { "Content-Type": "application/json" },
     });
   }
-};
+}
