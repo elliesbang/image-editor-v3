@@ -25,12 +25,19 @@ export function App() {
   const [loading, setLoading] = useState(true)
 
   /* ===============================
-     로그인 상태 감지 (핵심)
+     최초 세션 확인 + 상태 변경 감지
   =============================== */
   useEffect(() => {
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    let mounted = true
+
+    // ✅ 1. 최초 진입 시 세션 직접 확인
+    const initSession = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+
+      if (!mounted) return
+
       if (!session) {
         setUser({
           isLoggedIn: false,
@@ -57,15 +64,60 @@ export function App() {
         role: profile?.role ?? 'normal',
       })
 
-      // 관리자면 admin.html 이동
       if (profile?.role === 'admin') {
         window.location.href = '/admin.html'
+        return
+      }
+
+      setLoading(false)
+    }
+
+    initSession()
+
+    // ✅ 2. 이후 로그인/로그아웃 감지
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (!mounted) return
+
+      if (!session) {
+        setUser({
+          isLoggedIn: false,
+          id: '',
+          email: '',
+          name: '',
+          role: 'normal',
+        })
+        setLoading(false)
+        return
+      }
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('name, role')
+        .eq('id', session.user.id)
+        .single()
+
+      setUser({
+        isLoggedIn: true,
+        id: session.user.id,
+        email: session.user.email ?? '',
+        name: profile?.name ?? '사용자',
+        role: profile?.role ?? 'normal',
+      })
+
+      if (profile?.role === 'admin') {
+        window.location.href = '/admin.html'
+        return
       }
 
       setLoading(false)
     })
 
-    return () => subscription.unsubscribe()
+    return () => {
+      mounted = false
+      subscription.unsubscribe()
+    }
   }, [])
 
   /* ===============================
@@ -77,9 +129,7 @@ export function App() {
       password,
     })
 
-    if (error) {
-      alert(error.message)
-    }
+    if (error) alert(error.message)
   }
 
   /* ===============================
@@ -116,7 +166,7 @@ export function App() {
   }
 
   /* ===============================
-     로딩 중
+     로딩 화면
   =============================== */
   if (loading) {
     return (
@@ -127,7 +177,7 @@ export function App() {
   }
 
   /* ===============================
-     로그인 전 화면
+     로그인 전
   =============================== */
   if (!user.isLoggedIn) {
     return (
@@ -168,7 +218,7 @@ export function App() {
   }
 
   /* ===============================
-     로그인 후 메인 화면
+     로그인 후
   =============================== */
   return (
     <div className="min-h-screen p-8">
