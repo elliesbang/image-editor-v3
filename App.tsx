@@ -32,44 +32,54 @@ export function App() {
 
     // ✅ 1. 최초 진입 시 세션 직접 확인
     const initSession = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession()
+      try {
+        const {
+          data: { session },
+          error: sessionError,
+        } = await supabase.auth.getSession()
 
-      if (!mounted) return
+        if (sessionError) throw sessionError
 
-      if (!session) {
+        if (!mounted) return
+
+        if (!session) {
+          setUser({
+            isLoggedIn: false,
+            id: '',
+            email: '',
+            name: '',
+            role: 'normal',
+          })
+          setLoading(false)
+          return
+        }
+
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('name, role')
+          .eq('id', session.user.id)
+          .single()
+
+        if (profileError) throw profileError
+
         setUser({
-          isLoggedIn: false,
-          id: '',
-          email: '',
-          name: '',
-          role: 'normal',
+          isLoggedIn: true,
+          id: session.user.id,
+          email: session.user.email ?? '',
+          name: profile?.name ?? '사용자',
+          role: profile?.role ?? 'normal',
         })
+
+        if (profile?.role === 'admin') {
+          window.location.href = '/admin.html'
+          return
+        }
+
         setLoading(false)
-        return
+      } catch (error) {
+        console.error('세션 초기화 중 오류', error)
+        if (mounted) setLoading(false)
       }
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('name, role')
-        .eq('id', session.user.id)
-        .single()
-
-      setUser({
-        isLoggedIn: true,
-        id: session.user.id,
-        email: session.user.email ?? '',
-        name: profile?.name ?? '사용자',
-        role: profile?.role ?? 'normal',
-      })
-
-      if (profile?.role === 'admin') {
-        window.location.href = '/admin.html'
-        return
-      }
-
-      setLoading(false)
     }
 
     initSession()
@@ -78,40 +88,47 @@ export function App() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (!mounted) return
+      try {
+        if (!mounted) return
 
-      if (!session) {
+        if (!session) {
+          setUser({
+            isLoggedIn: false,
+            id: '',
+            email: '',
+            name: '',
+            role: 'normal',
+          })
+          setLoading(false)
+          return
+        }
+
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('name, role')
+          .eq('id', session.user.id)
+          .single()
+
+        if (profileError) throw profileError
+
         setUser({
-          isLoggedIn: false,
-          id: '',
-          email: '',
-          name: '',
-          role: 'normal',
+          isLoggedIn: true,
+          id: session.user.id,
+          email: session.user.email ?? '',
+          name: profile?.name ?? '사용자',
+          role: profile?.role ?? 'normal',
         })
+
+        if (profile?.role === 'admin') {
+          window.location.href = '/admin.html'
+          return
+        }
+
         setLoading(false)
-        return
+      } catch (error) {
+        console.error('세션 변경 감지 중 오류', error)
+        if (mounted) setLoading(false)
       }
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('name, role')
-        .eq('id', session.user.id)
-        .single()
-
-      setUser({
-        isLoggedIn: true,
-        id: session.user.id,
-        email: session.user.email ?? '',
-        name: profile?.name ?? '사용자',
-        role: profile?.role ?? 'normal',
-      })
-
-      if (profile?.role === 'admin') {
-        window.location.href = '/admin.html'
-        return
-      }
-
-      setLoading(false)
     })
 
     return () => {
