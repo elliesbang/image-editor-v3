@@ -1,6 +1,5 @@
 
 import React, { useState, useEffect } from 'react';
-import ReactDOM from 'react-dom/client';
 
 // Firebase CDN Imports
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
@@ -512,5 +511,6 @@ const AdminDashboard = () => {
   );
 };
 
-const root = ReactDOM.createRoot(document.getElementById('root')!);
-root.render(<AdminDashboard />);
+export function AdminApp() {
+  return <AdminDashboard />;
+}
