@@ -30,13 +30,31 @@ export function App() {
   useEffect(() => {
     let mounted = true
 
+    // Supabase가 응답하지 않을 경우를 대비해 타임아웃을 두어 로딩 화면에 갇히지 않도록 처리
+    const withTimeout = async <T,>(
+      promise: Promise<T>,
+      timeoutMs: number,
+      fallbackValue: T,
+    ) => {
+      return Promise.race([
+        promise,
+        new Promise<T>((resolve) => setTimeout(() => resolve(fallbackValue), timeoutMs)),
+      ])
+    }
+
     // ✅ 1. 최초 진입 시 세션 직접 확인
     const initSession = async () => {
       try {
+        const sessionResponse = await withTimeout(
+          supabase.auth.getSession(),
+          5000,
+          { data: { session: null }, error: null } as Awaited<ReturnType<typeof supabase.auth.getSession>>,
+        )
+
         const {
           data: { session },
           error: sessionError,
-        } = await supabase.auth.getSession()
+        } = sessionResponse
 
         if (sessionError) throw sessionError
 
